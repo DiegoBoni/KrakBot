@@ -175,7 +175,7 @@ CODEX_CLI_PATH=codex
 
 CLAUDE_MODEL=${config.claudeModel || 'claude-sonnet-4-6'}
 GEMINI_MODEL=${config.geminiModel || 'gemini-2.5-pro'}
-CODEX_MODEL=${config.codexModel || ''}
+CODEX_MODEL=${config.codexModel || 'gpt-5.2-codex'}
 
 MAX_RESPONSE_LENGTH=4000
 `

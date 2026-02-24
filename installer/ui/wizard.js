@@ -9,7 +9,7 @@ const state = {
     defaultAgent: 'claude',
     claudeModel: 'claude-sonnet-4-6',
     geminiModel: 'gemini-2.5-pro',
-    codexModel: 'o4-mini',
+    codexModel: 'gpt-5.2-codex',
     timeout: 120000,
     debug: false,
   },
@@ -374,7 +374,7 @@ function buildConfig() {
     defaultAgent:   $('default-agent').value || 'claude',
     claudeModel:    $('model-claude').value || 'claude-sonnet-4-6',
     geminiModel:    $('model-gemini').value || 'gemini-2.5-pro',
-    codexModel:     $('model-codex').value || 'o4-mini',
+    codexModel:     $('model-codex').value || 'gpt-5.2-codex',
     timeout:        parseInt($('timeout-slider').value) || 120000,
     debug:          $('debug-toggle').checked,
   }
@@ -405,7 +405,7 @@ CODEX_CLI_PATH=codex
 
 CLAUDE_MODEL=${config.claudeModel}
 GEMINI_MODEL=${config.geminiModel}
-CODEX_MODEL=${config.codexModel || ''}
+CODEX_MODEL=${config.codexModel || 'gpt-5.2-codex'}
 
 MAX_RESPONSE_LENGTH=4000`
 }
