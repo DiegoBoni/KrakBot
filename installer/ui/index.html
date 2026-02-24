@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KrakBot Installer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrapper">
+
+  <!-- ── Header ──────────────────────────────────────────────────────────── -->
+  <header>
+    <pre class="logo-pre">
+  _  _____         _    ____        _
+ | |/ / _ \ __ _| | _| __ )  ___ | |_
+ | ' /|  _// _` | |/ /  _ \ / _ \| __|
+ | . \| | | (_| |   <| |_) | (_) | |_
+ |_|\_\_|  \__,_|_|\_\____/ \___/ \__|</pre>
+    <h1>🐙⚡ KrakBot Installer</h1>
+    <p>Tu gateway de Telegram a múltiples agentes de IA</p>
+  </header>
+
+  <!-- ── Progress bar ─────────────────────────────────────────────────────── -->
+  <nav class="progress" id="progress-nav" aria-label="Progreso de instalación">
+    <div class="progress-dot active" data-step="1" title="Bienvenida">1</div>
+    <div class="progress-line" id="line-1-2"></div>
+    <div class="progress-dot" data-step="2" title="Entorno">2</div>
+    <div class="progress-line" id="line-2-3"></div>
+    <div class="progress-dot" data-step="3" title="Telegram">3</div>
+    <div class="progress-line" id="line-3-4"></div>
+    <div class="progress-dot" data-step="4" title="Agentes">4</div>
+    <div class="progress-line" id="line-4-5"></div>
+    <div class="progress-dot" data-step="5" title="Config">5</div>
+    <div class="progress-line" id="line-5-6"></div>
+    <div class="progress-dot" data-step="6" title="Resumen">6</div>
+    <div class="progress-line" id="line-6-7"></div>
+    <div class="progress-dot" data-step="7" title="Arranque">7</div>
+  </nav>
+
+  <!-- ── Main ─────────────────────────────────────────────────────────────── -->
+  <main>
+
+    <!-- ══ Step 1: Bienvenida ════════════════════════════════════════════════ -->
+    <section class="step active" data-step="1">
+      <div class="card">
+        <h2>Bienvenido a KrakBot</h2>
+        <p style="margin-top:0.5rem;">
+          KrakBot conecta tu Telegram con agentes de IA (Claude, Gemini, Codex)
+          para que podás hacer consultas desde tu teléfono con un mensaje.
+        </p>
+        <p style="margin-top:0.25rem;">
+          Este wizard te guía en 7 pasos para dejar el bot listo y funcionando.
+        </p>
+
+        <div class="banner-warning" id="banner-reconfig" hidden>
+          ⚠️ <strong>Modo reconfiguración</strong> — Ya tenés un <code>.env</code> existente. Los valores actuales van a precargarse en el formulario.
+        </div>
+
+        <div class="btn-row" style="margin-top:1.5rem;">
+          <button class="btn btn-primary" id="btn-start">Empezar instalación →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Step 2: Entorno ═══════════════════════════════════════════════════ -->
+    <section class="step" data-step="2">
+      <div class="card">
+        <h2>Verificación del entorno</h2>
+        <p>Comprobando que tu sistema tiene todo lo necesario.</p>
+
+        <ul class="check-list" id="env-checks" style="margin-top:1rem;">
+          <li id="node-status">
+            <span class="check-icon">⏳</span>
+            <span>Node.js</span>
+            <span class="check-detail" id="node-detail">verificando...</span>
+          </li>
+          <li id="npm-status">
+            <span class="check-icon">⏳</span>
+            <span>npm</span>
+            <span class="check-detail" id="npm-detail">verificando...</span>
+          </li>
+        </ul>
+
+        <!-- Git update section (hidden si no hay .git) -->
+        <div id="git-update-section" hidden>
+          <div class="section-title">Actualización disponible</div>
+          <p style="font-size:0.875rem;">Se detectó un repositorio Git. Podés actualizar KrakBot a la última versión.</p>
+          <button class="btn btn-secondary btn-sm" id="btn-git-pull" style="margin-top:0.5rem;">
+            ↑ Actualizar KrakBot (git pull)
+          </button>
+          <div class="terminal" id="terminal-git" hidden></div>
+        </div>
+
+        <div class="section-title" style="margin-top:1.25rem;">Dependencias npm</div>
+        <p style="font-size:0.875rem;">Instala los paquetes necesarios para que el bot funcione.</p>
+        <div style="margin-top:0.75rem; display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" id="btn-npm-install">Instalar dependencias npm</button>
+          <span id="npm-install-status" style="font-size:0.8rem; color:var(--text-muted);"></span>
+        </div>
+        <div class="terminal" id="terminal-npm" hidden></div>
+
+        <div class="btn-row">
+          <button class="btn btn-primary" id="btn-step2-next" disabled>Siguiente →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Step 3: Token de Telegram ═════════════════════════════════════════ -->
+    <section class="step" data-step="3">
+      <div class="card">
+        <h2>Token de Telegram</h2>
+        <p>Necesitás crear un bot en Telegram para obtener el token.</p>
+
+        <ol style="margin-top:0.75rem; margin-bottom:1.25rem;">
+          <li>Abrí Telegram y buscá <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a></li>
+          <li>Enviá el comando <code>/newbot</code></li>
+          <li>Seguí las instrucciones: elegí un nombre y un username</li>
+          <li>Copiá el token que te da (formato: <code>123456:ABC-DEF...</code>)</li>
+        </ol>
+
+        <div class="input-group">
+          <label for="telegram-token">Token del bot</label>
+          <div class="input-wrap">
+            <input type="password" id="telegram-token" placeholder="123456789:AABBccDDeeFF-GG..." autocomplete="off" spellcheck="false">
+            <button class="btn-eye" id="btn-toggle-token" type="button" title="Mostrar/ocultar token" aria-label="Mostrar token">👁</button>
+          </div>
+          <div class="input-feedback" id="token-feedback"></div>
+        </div>
+
+        <div class="input-group">
+          <label for="authorized-users">
+            Usuarios autorizados
+            <span class="tooltip-wrap">
+              <span class="tooltip-icon">?</span>
+              <span class="tooltip-box">IDs de Telegram separados por coma. Si lo dejás vacío, cualquier usuario puede usar el bot. Para encontrar tu ID, escribile a @userinfobot en Telegram.</span>
+            </span>
+          </label>
+          <input type="text" id="authorized-users" placeholder="123456789, 987654321 (opcional)">
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-secondary" id="btn-step3-back">← Volver</button>
+          <button class="btn btn-primary" id="btn-step3-next">Siguiente →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Step 4: Agentes de IA ══════════════════════════════════════════════ -->
+    <section class="step" data-step="4">
+      <div class="card">
+        <h2>Agentes de IA</h2>
+        <p>Detectando qué CLIs tenés instalados. Necesitás al menos uno para usar el bot.</p>
+
+        <div class="agents-grid" style="margin-top:1rem;">
+
+          <!-- Claude -->
+          <div class="agent-card" id="card-claude" data-agent="claude">
+            <h3>🤖 Claude</h3>
+            <p class="agent-desc">Claude Code de Anthropic — excelente para código y análisis</p>
+            <span class="badge badge-pending" id="badge-claude">⏳ Verificando...</span>
+            <div>
+              <button class="btn btn-secondary btn-sm" id="btn-install-claude" hidden>Instalar Claude Code</button>
+              <div class="terminal" id="terminal-claude" hidden></div>
+              <p class="auth-instruction" id="auth-claude" hidden>
+                Abrí una terminal y ejecutá: <code>claude auth</code>
+              </p>
+              <label class="checkbox-row" id="row-auth-claude" hidden>
+                <input type="checkbox" id="auth-check-claude"> Ya me autentiqué con Claude
+              </label>
+              <div class="select-row" id="select-row-claude" hidden>
+                <label for="model-claude">Modelo:</label>
+                <select id="model-claude">
+                  <option value="claude-sonnet-4-6">claude-sonnet-4-6 (recomendado)</option>
+                  <option value="claude-opus-4-6">claude-opus-4-6 (más potente)</option>
+                  <option value="claude-haiku-4-5-20251001">claude-haiku-4-5 (más rápido)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Gemini -->
+          <div class="agent-card" id="card-gemini" data-agent="gemini">
+            <h3>✨ Gemini</h3>
+            <p class="agent-desc">Gemini CLI de Google — ideal para búsquedas y síntesis</p>
+            <span class="badge badge-pending" id="badge-gemini">⏳ Verificando...</span>
+            <div>
+              <button class="btn btn-secondary btn-sm" id="btn-install-gemini" hidden>Instalar Gemini CLI</button>
+              <div class="terminal" id="terminal-gemini" hidden></div>
+              <p class="auth-instruction" id="auth-gemini" hidden>
+                Al ejecutar Gemini por primera vez, te va a pedir iniciar sesión con Google.
+              </p>
+              <label class="checkbox-row" id="row-auth-gemini" hidden>
+                <input type="checkbox" id="auth-check-gemini"> Ya inicié sesión con Google
+              </label>
+              <div class="select-row" id="select-row-gemini" hidden>
+                <label for="model-gemini">Modelo:</label>
+                <select id="model-gemini">
+                  <option value="gemini-2.5-pro">gemini-2.5-pro (recomendado)</option>
+                  <option value="gemini-2.5-flash">gemini-2.5-flash (más rápido)</option>
+                  <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Codex -->
+          <div class="agent-card" id="card-codex" data-agent="codex">
+            <h3>⚡ Codex</h3>
+            <p class="agent-desc">Codex CLI de OpenAI — especializado en código</p>
+            <span class="badge badge-pending" id="badge-codex">⏳ Verificando...</span>
+            <div>
+              <button class="btn btn-secondary btn-sm" id="btn-install-codex" hidden>Instalar Codex CLI</button>
+              <div class="terminal" id="terminal-codex" hidden></div>
+              <p class="auth-instruction" id="auth-codex" hidden>
+                Requiere <code>OPENAI_API_KEY</code>. Ver instrucciones abajo.
+              </p>
+              <label class="checkbox-row" id="row-auth-codex" hidden>
+                <input type="checkbox" id="auth-check-codex"> Tengo mi OPENAI_API_KEY lista
+              </label>
+              <div class="select-row" id="select-row-codex" hidden>
+                <label for="model-codex">Modelo:</label>
+                <select id="model-codex">
+                  <option value="o4-mini">o4-mini (recomendado)</option>
+                  <option value="o3">o3 (más potente)</option>
+                  <option value="o3-mini">o3-mini</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- /.agents-grid -->
+
+        <details>
+          <summary>Configuración avanzada para Codex (OPENAI_API_KEY)</summary>
+          <div class="details-body">
+            <p>Codex CLI requiere una API key de OpenAI. Para configurarla:</p>
+            <ol style="margin-top:0.5rem; padding-left:1.2rem;">
+              <li>Obtené tu API key en <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a></li>
+              <li>Después de que el wizard escriba el <code>.env</code>, abrilo y agregá:<br>
+                <code>OPENAI_API_KEY=sk-tu-clave-aqui</code>
+              </li>
+            </ol>
+          </div>
+        </details>
+
+        <p id="agents-warning" style="color:var(--accent-red); font-size:0.875rem; display:none; margin-bottom:0.5rem;">
+          ⚠️ Necesitás al menos un agente instalado y autenticado para continuar.
+        </p>
+
+        <div class="btn-row">
+          <button class="btn btn-secondary" id="btn-step4-back">← Volver</button>
+          <button class="btn btn-primary" id="btn-step4-next">Siguiente →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Step 5: Config avanzada ════════════════════════════════════════════ -->
+    <section class="step" data-step="5">
+      <div class="card">
+        <h2>Configuración avanzada</h2>
+        <p>Los valores por defecto funcionan bien. Ajustá solo lo que necesitás.</p>
+
+        <div style="margin-top:1.25rem;">
+          <div class="input-group">
+            <label for="default-agent">Agente por defecto</label>
+            <select id="default-agent">
+              <option value="claude">Claude</option>
+              <option value="gemini">Gemini</option>
+              <option value="codex">Codex</option>
+            </select>
+          </div>
+
+          <div class="slider-row" style="margin-top:1rem;">
+            <label for="timeout-slider">Timeout por respuesta</label>
+            <input type="range" id="timeout-slider" min="30000" max="300000" step="10000" value="120000">
+            <span class="slider-value" id="timeout-label">120s</span>
+          </div>
+
+          <div class="toggle-row" style="margin-top:0.75rem;">
+            <label class="toggle">
+              <input type="checkbox" id="debug-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+            <span style="font-size:0.875rem;">Debug logs</span>
+            <span style="font-size:0.78rem; color:var(--text-muted);">(más verbosidad en los logs del servidor)</span>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-secondary" id="btn-step5-back">← Volver</button>
+          <button class="btn btn-primary" id="btn-step5-next">Siguiente →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Step 6: Resumen ════════════════════════════════════════════════════ -->
+    <section class="step" data-step="6">
+      <div class="card">
+        <h2>Resumen de configuración</h2>
+        <p>Revisá todo antes de escribir el <code>.env</code>.</p>
+
+        <ul class="config-summary" id="config-summary" style="margin-top:1rem;"></ul>
+
+        <div class="section-title">Preview del .env</div>
+        <pre class="env-preview" id="env-preview"></pre>
+
+        <div class="btn-row">
+          <button class="btn btn-secondary" id="btn-step6-back">← Volver</button>
+          <button class="btn btn-primary" id="btn-confirm">Confirmar y escribir configuración →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Step 7: Arranque ═══════════════════════════════════════════════════ -->
+    <section class="step" data-step="7">
+      <div class="card">
+        <h2>Arrancando KrakBot</h2>
+        <p>Escribiendo la configuración e iniciando el bot...</p>
+
+        <div class="terminal" id="terminal-start" style="margin-top:1rem; max-height:300px;"></div>
+
+        <div class="success-msg" id="success-msg" hidden>
+          🐙⚡ ¡KrakBot está corriendo!
+          <div class="sub">Tu bot de Telegram está activo y listo para recibir mensajes.</div>
+        </div>
+
+        <details id="pm2-details" style="margin-top:1rem;" hidden>
+          <summary>¿Cómo mantenerlo activo después de cerrar la terminal?</summary>
+          <div class="details-body">
+            <p>Para que el bot siga corriendo en segundo plano, podés usar <strong>pm2</strong>:</p>
+            <pre style="background:#000; color:var(--accent-cyan); padding:0.75rem; border-radius:4px; font-size:0.8rem; margin-top:0.5rem;">npm install -g pm2
+pm2 start npm --name krakbot -- start
+pm2 save
+pm2 startup</pre>
+            <p style="margin-top:0.5rem;">O con <strong>screen</strong>:</p>
+            <pre style="background:#000; color:var(--accent-cyan); padding:0.75rem; border-radius:4px; font-size:0.8rem; margin-top:0.5rem;">screen -S krakbot
+npm start
+# Ctrl+A, D para desacoplar</pre>
+          </div>
+        </details>
+
+        <div class="btn-row" style="margin-top:1.25rem;">
+          <a class="btn btn-primary" id="btn-open-bot" href="#" target="_blank" rel="noopener" hidden>
+            Abrir mi bot en Telegram →
+          </a>
+          <button class="btn btn-danger" id="btn-shutdown">Cerrar instalador</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div><!-- /.wrapper -->
+
+<script src="wizard.js" defer></script>
+</body>
+</html>

@@ -20,13 +20,13 @@ ask()     { echo -e "${BOLD}${1}${RESET}"; }
 echo ""
 echo -e "${CYAN}${BOLD}"
 cat << 'EOF'
-  _  __           _                _____       _
- | |/ /_ __ __ _ | | __ ___  _ __ / ____| __ _| |_ ___
- | ' /| '__/ _` || |/ // _ \| '_ \ |  _ |/ _` | __/ _ \
- | . \| | | (_| ||   <|  __/| | | | |_| | (_| | ||  __/
- |_|\_\_|  \__,_||_|\_\\___||_| |_|\____|\__,_|\__\___|
+  _  _____         _    ____        _
+ | |/ / _ \ __ _| | _| __ )  ___ | |_
+ | ' /|  _// _` | |/ /  _ \ / _ \| __|
+ | . \| | | (_| |   <| |_) | (_) | |_
+ |_|\_\_|  \__,_|_|\_\____/ \___/ \__|
 
-                          ⚡  Setup
+            🐙⚡  Setup (modo terminal)
 EOF
 echo -e "${RESET}"
 
@@ -48,11 +48,11 @@ fi
 success "npm $(npm -v)"
 
 # ─── clone or use cwd ─────────────────────────────────────────────────────────
-INSTALL_DIR="${HOME}/.krakengate"
+INSTALL_DIR="${HOME}/.krakbot"
 
 if [ ! -f "package.json" ]; then
-  info "Clonando KrakenGate en ${INSTALL_DIR}..."
-  git clone --depth 1 https://github.com/BoniBot/KrakenGate "$INSTALL_DIR" 2>/dev/null \
+  info "Clonando KrakBot en ${INSTALL_DIR}..."
+  git clone --depth 1 https://github.com/DiegoBoni/KrakBot "$INSTALL_DIR" 2>/dev/null \
     || { error "No se pudo clonar el repositorio."; exit 1; }
   cd "$INSTALL_DIR"
   success "Repo clonado en ${INSTALL_DIR}"
