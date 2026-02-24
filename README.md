@@ -1,14 +1,14 @@
 ```
-  _  __           _                _____       _
- | |/ /_ __ __ _ | | __ ___  _ __ / ____| __ _| |_ ___
- | ' /| '__/ _` || |/ // _ \| '_ \ |  _ |/ _` | __/ _ \
- | . \| | | (_| ||   <|  __/| | | | |_| | (_| | ||  __/
- |_|\_\_|  \__,_||_|\_\\___||_| |_|\____|\__,_|\__\___|
+  _  __           _    ____        _
+ | |/ /_ __ __ _ | | _| __ )  ___ | |_
+ | ' /| '__/ _` || |/ /  _ \ / _ \| __|
+ | . \| | | (_| ||   <| |_) | (_) | |_
+ |_|\_\_|  \__,_||_|\_\____/ \___/ \__|
 
-                          ⚡
+         🐙  ⚡
 ```
 
-# KrakenGate
+# KrakBot
 
 > Gateway de Telegram hacia múltiples agentes de IA CLI — Claude Code, Gemini CLI y OpenAI Codex CLI.
 > Un mensaje, el agente que elijas, respuesta directo en el chat.
@@ -18,7 +18,7 @@
 ## Instalación rápida
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KrakenGate/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/KrakBot/main/setup.sh | bash
 ```
 
 El script interactivo:
@@ -31,8 +31,8 @@ El script interactivo:
 **Instalación manual** (si preferís hacerlo a mano):
 
 ```bash
-git clone https://github.com/BoniBot/KrakenGate
-cd KrakenGate
+git clone https://github.com/BoniBot/KrakBot
+cd KrakBot
 cp .env.example .env   # editá con tu token y config
 npm install
 npm start

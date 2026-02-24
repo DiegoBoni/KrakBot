@@ -16,7 +16,7 @@ async function handleStart(ctx) {
   const name = agent?.name ?? session.agent
 
   await ctx.reply(
-    `👋 *Bienvenido al AI Gateway Bot*\n\n` +
+    `🐙⚡ *Bienvenido a KrakBot*\n\n` +
     `${emoji} Agente activo: *${name}*\n\n` +
     `Enviame cualquier tarea y se la delego al agente.\n\n` +
     `*Comandos útiles:*\n` +
@@ -27,7 +27,8 @@ async function handleStart(ctx) {
     `/ayuda — instrucciones detalladas\n\n` +
     `💡 También podés mencionar un agente al inicio del mensaje:\n` +
     `\`@claude explicá este código\`\n` +
-    `\`@gemini resumí este texto\``,
+    `\`@gemini resumí este texto\`\n` +
+    `\`@codex generá este script\``,
     { parse_mode: 'Markdown' }
   )
 }
