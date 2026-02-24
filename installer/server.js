@@ -95,7 +95,7 @@ function readBody(req) {
 }
 
 // ─── SSE streaming ────────────────────────────────────────────────────────────
-function streamCommand(res, command, args, cwd) {
+function streamCommand(req, res, command, args, cwd) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
