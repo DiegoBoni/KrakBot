@@ -15,20 +15,33 @@
 
 ---
 
-## Instalación rápida
+## Instalación
+
+### Mac / Linux — una línea
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/DiegoBoni/KrakBot/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DiegoBoni/KrakBot/main/bootstrap.sh | bash
 ```
 
-El script interactivo:
-- Verifica Node.js >=18
-- Instala dependencias
-- Te pregunta token, usuarios autorizados, agente por default y modelos
-- Crea el `.env` listo para usar
-- Verifica qué CLIs tenés instalados
+Abre un wizard visual en el browser que te guía paso a paso:
+verifica Node.js, instala dependencias, configura el token de Telegram,
+detecta los CLIs de IA instalados y arranca el bot.
 
-**Instalación manual** (si preferís hacerlo a mano):
+### Windows
+
+1. Descargá el ZIP → **[KrakBot-main.zip](https://github.com/DiegoBoni/KrakBot/archive/refs/heads/main.zip)**
+2. Extraé la carpeta
+3. Clic derecho en `bootstrap.ps1` → **Ejecutar con PowerShell**
+
+### Ya tenés Node.js instalado
+
+```bash
+git clone https://github.com/DiegoBoni/KrakBot
+cd KrakBot
+npm run setup
+```
+
+### Instalación manual (headless)
 
 ```bash
 git clone https://github.com/DiegoBoni/KrakBot
