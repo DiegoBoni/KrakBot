@@ -127,11 +127,20 @@ if [ ! -f "installer/server.js" ]; then
   else
     info "Clonando KrakBot en ${INSTALL_DIR}..."
     if command -v git &>/dev/null; then
-      git clone --depth 1 https://github.com/DiegoBoni/KrakBot "$INSTALL_DIR" 2>/dev/null \
-        || { error "No se pudo clonar el repositorio. Verificá tu conexión."; exit 1; }
+      # Si el directorio ya existe de un intento previo, limpiarlo
+      if [ -d "$INSTALL_DIR" ]; then
+        warn "Directorio ${INSTALL_DIR} ya existe, limpiando..."
+        rm -rf "$INSTALL_DIR"
+      fi
+      if ! git clone --depth 1 https://github.com/DiegoBoni/KrakBot "$INSTALL_DIR"; then
+        error "No se pudo clonar el repositorio."
+        error "Verificá tu conexión o descargá el ZIP manualmente:"
+        error "  https://github.com/DiegoBoni/KrakBot/archive/refs/heads/main.zip"
+        exit 1
+      fi
       success "Repositorio clonado en ${INSTALL_DIR}"
     else
-      error "Git no encontrado. Instalalo o descargá el repositorio manualmente."
+      error "Git no encontrado. Instalalo o descargá el repositorio manualmente:"
       error "  https://github.com/DiegoBoni/KrakBot"
       exit 1
     fi
