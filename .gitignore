@@ -15,5 +15,9 @@ AGENTS.md
 CLAUDE.md
 GEMINI.md
 
+# Bot personalization data (local only — contains user identity and memories)
+data/SOUL.md
+data/memories/
+
 # macOS metadata
 .DS_Store

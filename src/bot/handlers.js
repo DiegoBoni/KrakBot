@@ -1,11 +1,95 @@
 const { dispatch, resolveAgent, getAgentInfo, listAgents } = require('../agents/router')
 const sessionManager = require('../utils/sessionManager')
+const soulManager = require('../utils/soulManager')
+const memoryManager = require('../utils/memoryManager')
 const logger = require('../utils/logger')
 
 const MAX_RESPONSE_LENGTH = parseInt(process.env.MAX_RESPONSE_LENGTH) || 4000
 
 // Regex to detect "@agentAlias task" at the start of a message
 const MENTION_RE = /^@(\w+)\s+([\s\S]+)$/
+
+// ─── Onboarding ────────────────────────────────────────────────────────────────
+
+const ONBOARDING_QUESTIONS = {
+  ask_human_name: '¡Hola! Antes de arrancar... ¿cómo te llamo? (tu nombre o apodo)',
+  ask_bot_name:   null, // built dynamically with humanName
+  ask_tone:       '¿Cómo preferís que te hable?\nEj: *directo y técnico* / *relajado con humor* / *formal*',
+  ask_extra:      '¿Algo más que deba saber de vos o de tus proyectos? Podés saltear esto con /skip',
+}
+
+function buildSoulTemplate(answers) {
+  const humanName = answers.ask_human_name || 'amigo'
+  const botName   = answers.ask_bot_name   || 'KrakBot'
+  const tone      = answers.ask_tone       || 'Directo y técnico. Sin floro.'
+  const extra     = answers.ask_extra      || ''
+
+  return `# Alma de ${botName}
+
+## Identidad
+- **Nombre del bot:** ${botName}
+- **Icono:** 🐙⚡
+- **Idioma:** Español (Argentina)
+
+## Mi humano
+- **Nombre:** ${humanName}${extra ? `\n- **Contexto:** ${extra}` : ''}
+
+## Personalidad
+${tone}
+
+## Instrucciones
+- Siempre respondé en el idioma del mensaje del usuario.
+- Sos un asistente de IA conversacional. No sos un agente de terminal.
+- Si el contexto incluye memorias guardadas, dales prioridad.
+- Dirigite al usuario como ${humanName}.
+`
+}
+
+async function handleOnboarding(ctx, answer) {
+  const userId = ctx.from.id
+  const ob = sessionManager.getOnboarding(userId)
+  if (!ob) return
+
+  // First call (answer === null): just send the first question without advancing
+  if (answer !== null) {
+    const { done } = sessionManager.advanceOnboarding(userId, answer)
+
+    if (done) {
+      const answers = sessionManager.getOnboarding(userId).answers
+      const humanName = answers.ask_human_name || 'amigo'
+      const soul = buildSoulTemplate(answers)
+      await soulManager.writeSoul(soul)
+      const pending = sessionManager.getOnboarding(userId).pendingMessage
+      sessionManager.clearOnboarding(userId)
+
+      await ctx.reply(
+        `Listo, *${humanName}*! 🐙⚡ Ya sé quién sos. ¿En qué te ayudo?`,
+        { parse_mode: 'Markdown' }
+      )
+
+      if (pending) {
+        ctx.message.text = pending
+        return handleTask(ctx)
+      }
+      return
+    }
+  }
+
+  // Send the question for the current step
+  const currentStep = sessionManager.getOnboarding(userId).step
+  let question
+
+  if (currentStep === 'ask_bot_name') {
+    const humanName = sessionManager.getOnboarding(userId).answers.ask_human_name || 'vos'
+    question = `Buenísimo, *${humanName}*! ¿Y cómo querés que me llame yo?\n(Enter o cualquier texto — dejame como *KrakBot* si querés)`
+  } else {
+    question = ONBOARDING_QUESTIONS[currentStep]
+  }
+
+  if (question) {
+    await ctx.reply(question, { parse_mode: 'Markdown' })
+  }
+}
 
 // ─── Command handlers ──────────────────────────────────────────────────────────
 
@@ -24,6 +108,8 @@ async function handleStart(ctx) {
     `/claude · /gemini · /codex — cambiar agente\n` +
     `/sesion — info de tu sesión\n` +
     `/limpiar — borrar historial\n` +
+    `/soul — ver o configurar mi personalidad\n` +
+    `/remember — guardar una memoria\n` +
     `/ayuda — instrucciones detalladas\n\n` +
     `💡 También podés mencionar un agente al inicio del mensaje:\n` +
     `\`@claude explicá este código\`\n` +
@@ -31,6 +117,11 @@ async function handleStart(ctx) {
     `\`@codex generá este script\``,
     { parse_mode: 'Markdown' }
   )
+
+  if (!soulManager.soulExists() && !sessionManager.getOnboarding(ctx.from.id)) {
+    sessionManager.startOnboarding(ctx.from.id, null)
+    await handleOnboarding(ctx, null)
+  }
 }
 
 async function handleHelp(ctx) {
@@ -45,8 +136,16 @@ async function handleHelp(ctx) {
     `También funcionan los aliases: \`@cc\`, \`@gem\`, \`@g\`, \`@gpt\`, etc.\n\n` +
     `*Cambiar agente activo:*\n` +
     `/claude · /gemini · /codex\n\n` +
+    `*Personalización:*\n` +
+    `/soul — ver mi alma (personalidad y contexto)\n` +
+    `/soul reset — reconfigurar desde cero\n` +
+    `/reloadsoul — recargar SOUL.md sin reiniciar\n\n` +
+    `*Memorias:*\n` +
+    `/remember <texto> — guardar una memoria\n` +
+    `/memories — listar memorias guardadas\n` +
+    `/forget last|<id> — borrar una memoria\n\n` +
     `*Historial:*\n` +
-    `Claude recibe las últimas 6 entradas del historial como contexto.\n` +
+    `Todos los agentes reciben las últimas 6 entradas como contexto.\n` +
     `/limpiar para borrar el historial.\n\n` +
     `*Límite de respuesta:* ${MAX_RESPONSE_LENGTH} caracteres por mensaje (se divide automáticamente).`,
     { parse_mode: 'Markdown' }
@@ -101,13 +200,140 @@ async function handleClearHistory(ctx) {
   await ctx.reply('🗑 Historial borrado. La siguiente respuesta comenzará sin contexto previo.')
 }
 
+// ─── Soul handlers ─────────────────────────────────────────────────────────────
+
+async function handleSoul(ctx) {
+  const userId = ctx.from.id
+  const parts = ctx.message.text.trim().split(/\s+/)
+  const subcmd = parts[1]?.toLowerCase()
+
+  if (subcmd === 'reset') {
+    if (soulManager.soulExists()) {
+      // Ask for confirmation via a temporary onboarding state
+      const session = sessionManager.getOrCreate(userId)
+      session.onboarding = { step: 'awaiting_reset_confirm', answers: {}, pendingMessage: null }
+      await ctx.reply(
+        '¿Seguro que querés resetear mi alma? Se va a borrar todo lo que sé de vos. (respondé *sí* o *no*)',
+        { parse_mode: 'Markdown' }
+      )
+    } else {
+      sessionManager.startOnboarding(userId, null)
+      await handleOnboarding(ctx, null)
+    }
+    return
+  }
+
+  const soul = soulManager.get()
+  if (!soul) {
+    await ctx.reply(
+      'No tengo alma todavía 😶 Mandame cualquier mensaje y te pregunto cómo configurarla.',
+      { parse_mode: 'Markdown' }
+    )
+    return
+  }
+
+  const preview = soul.length > 3800 ? soul.slice(0, 3800) + '\n...(truncado)' : soul
+  await ctx.reply(`📄 *Mi alma actual:*\n\n\`\`\`\n${preview}\n\`\`\``, { parse_mode: 'Markdown' })
+    .catch(() => ctx.reply(`📄 Mi alma actual:\n\n${preview}`))
+}
+
+async function handleReloadSoul(ctx) {
+  soulManager.reload()
+  const exists = soulManager.soulExists()
+  await ctx.reply(
+    exists ? '🔄 SOUL.md recargado correctamente.' : '⚠️ SOUL.md no encontrado en disco.'
+  )
+}
+
+async function handleSkip(ctx) {
+  const userId = ctx.from.id
+  const ob = sessionManager.getOnboarding(userId)
+  if (!ob || ob.step !== 'ask_extra') {
+    await ctx.reply('(No hay nada que saltear ahora.)')
+    return
+  }
+  // Advance with empty answer
+  sessionManager.advanceOnboarding(userId, '')
+  await handleOnboarding(ctx, null)
+}
+
+// ─── Memory handlers ───────────────────────────────────────────────────────────
+
+async function handleRemember(ctx) {
+  const text = ctx.message.text.replace(/^\/remember\s*/i, '').trim()
+  if (!text) {
+    await ctx.reply('Usá `/remember <texto>` para guardar una memoria.', { parse_mode: 'Markdown' })
+    return
+  }
+  const id = await memoryManager.save(text)
+  await ctx.reply(`🧠 Memoria guardada.\n\`${id}\``, { parse_mode: 'Markdown' })
+}
+
+async function handleMemories(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/)
+  const page = parseInt(parts[1]) || 1
+  const memories = await memoryManager.list(page, 10)
+
+  if (memories.length === 0) {
+    await ctx.reply(page > 1 ? 'No hay más memorias.' : 'No tenés memorias guardadas.')
+    return
+  }
+
+  const lines = memories.map((m, i) => {
+    const idx = (page - 1) * 10 + i + 1
+    const date = m.date ? m.date.slice(0, 10) : '?'
+    return `${idx}. [${date}] ${m.preview}`
+  })
+
+  await ctx.reply(
+    `🧠 *Memorias (página ${page}):*\n\n${lines.join('\n')}\n\nUsá \`/memories ${page + 1}\` para ver más.`,
+    { parse_mode: 'Markdown' }
+  ).catch(() => ctx.reply(`Memorias (página ${page}):\n\n${lines.join('\n')}`))
+}
+
+async function handleForget(ctx) {
+  const parts = ctx.message.text.trim().split(/\s+/)
+  const arg = parts[1] || 'last'
+  const ok = await memoryManager.remove(arg)
+  if (ok) {
+    await ctx.reply(`🗑 Memoria borrada.`)
+  } else {
+    await ctx.reply(`❌ No encontré una memoria con ese ID. Usá /memories para ver los IDs.`)
+  }
+}
+
 // ─── Main task handler ─────────────────────────────────────────────────────────
 
 async function handleTask(ctx) {
   const text = ctx.message.text?.trim()
   if (!text) return
 
-  const session = sessionManager.getOrCreate(ctx.from.id)
+  const userId = ctx.from.id
+  const session = sessionManager.getOrCreate(userId)
+
+  // Handle reset confirmation
+  if (session.onboarding?.step === 'awaiting_reset_confirm') {
+    const answer = text.toLowerCase()
+    if (answer === 'sí' || answer === 'si' || answer === 's') {
+      sessionManager.startOnboarding(userId, null)
+      await handleOnboarding(ctx, null)
+    } else {
+      sessionManager.clearOnboarding(userId)
+      await ctx.reply('Ok, cancelado. Mi alma sigue igual. 🐙')
+    }
+    return
+  }
+
+  // If onboarding is active, route to it
+  if (session.onboarding) {
+    return handleOnboarding(ctx, text)
+  }
+
+  // If no SOUL.md, start onboarding and save this message as pending
+  if (!soulManager.soulExists()) {
+    sessionManager.startOnboarding(userId, text)
+    return handleOnboarding(ctx, null)
+  }
 
   // Parse "@alias task" mention at the start of the message
   let agentKey = null
@@ -122,7 +348,6 @@ async function handleTask(ctx) {
       prompt = match[2].trim()
       logger.debug(`Mention resolved: @${alias} → ${resolved}`)
     }
-    // If alias doesn't resolve to a known agent, treat the whole message as the prompt
   }
 
   // Show "processing..." status message
@@ -134,7 +359,6 @@ async function handleTask(ctx) {
       `${activeAgent.emoji} Procesando con *${activeAgent.name}*...`,
       { parse_mode: 'Markdown' }
     )
-    // Edit status every 30 s so the user knows we're still working
     let elapsed = 0
     heartbeatInterval = setInterval(async () => {
       elapsed += 30
@@ -156,20 +380,18 @@ async function handleTask(ctx) {
     const response = await dispatch(agentKey, prompt, session)
     clearInterval(heartbeatInterval)
 
-    // Save to history (only for the session's active agent, not one-off mentions)
     if (!agentKey) {
-      sessionManager.addToHistory(ctx.from.id, 'user', prompt)
-      sessionManager.addToHistory(ctx.from.id, 'assistant', response)
+      sessionManager.addToHistory(userId, 'user', prompt)
+      sessionManager.addToHistory(userId, 'assistant', response)
     }
 
-    // Split response if needed and send
     const chunks = splitMessage(response, MAX_RESPONSE_LENGTH)
     for (const chunk of chunks) {
       await sendWithFallback(ctx, chunk)
     }
   } catch (err) {
     clearInterval(heartbeatInterval)
-    logger.error(`Task failed for user ${ctx.from.id}: ${err.message}`)
+    logger.error(`Task failed for user ${userId}: ${err.message}`)
     const agentName = getAgentInfo(agentKey || session.agent)?.name ?? 'Agente'
     const shortMsg = (err.message ?? 'Error desconocido').split('\n')[0].slice(0, 200)
     try {
@@ -225,10 +447,6 @@ async function handlePing(ctx, agentKeyArg) {
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 
-/**
- * Splits a long text into chunks of at most maxLength characters.
- * Tries to break on newlines to avoid splitting mid-sentence.
- */
 function splitMessage(text, maxLength) {
   if (text.length <= maxLength) return [text]
 
@@ -237,7 +455,7 @@ function splitMessage(text, maxLength) {
 
   while (remaining.length > maxLength) {
     let cutAt = remaining.lastIndexOf('\n', maxLength)
-    if (cutAt < maxLength * 0.5) cutAt = maxLength // no good newline found
+    if (cutAt < maxLength * 0.5) cutAt = maxLength
     chunks.push(remaining.slice(0, cutAt))
     remaining = remaining.slice(cutAt).trimStart()
   }
@@ -246,15 +464,10 @@ function splitMessage(text, maxLength) {
   return chunks
 }
 
-/**
- * Sends a message wrapped in a code block (Markdown).
- * Falls back to plain text if Telegram rejects the parse_mode.
- */
 async function sendWithFallback(ctx, text) {
   try {
     await ctx.reply(`\`\`\`\n${text}\n\`\`\``, { parse_mode: 'Markdown' })
   } catch {
-    // Markdown parse error — send as plain text
     await ctx.reply(text)
   }
 }
@@ -268,4 +481,10 @@ module.exports = {
   handleClearHistory,
   handleTask,
   handlePing,
+  handleSoul,
+  handleReloadSoul,
+  handleSkip,
+  handleRemember,
+  handleMemories,
+  handleForget,
 }

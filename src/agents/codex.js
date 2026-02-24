@@ -1,16 +1,11 @@
 const { runCLI } = require('./runner')
 const { AGENTS } = require('./router')
+const contextBuilder = require('../utils/contextBuilder')
 
-/**
- * Runs a prompt through OpenAI Codex CLI.
- *
- * @param {string} prompt
- * @param {object} session
- * @returns {Promise<string>}
- */
 async function run(prompt, session) {
   const agent = AGENTS.codex
-  return runCLI([agent.cli, agent.printFlag, ...(agent.extraFlags ?? []), prompt])
+  const fullPrompt = await contextBuilder.build(prompt, session)
+  return runCLI([agent.cli, agent.printFlag, ...(agent.extraFlags ?? []), fullPrompt])
 }
 
 module.exports = { run }

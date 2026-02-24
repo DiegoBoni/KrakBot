@@ -1,16 +1,11 @@
 const { runCLI } = require('./runner')
 const { AGENTS } = require('./router')
+const contextBuilder = require('../utils/contextBuilder')
 
-/**
- * Runs a prompt through Gemini CLI.
- *
- * @param {string} prompt
- * @param {object} session
- * @returns {Promise<string>}
- */
 async function run(prompt, session) {
   const agent = AGENTS.gemini
-  return runCLI([agent.cli, agent.printFlag, prompt, ...(agent.extraFlags ?? [])])
+  const fullPrompt = await contextBuilder.build(prompt, session)
+  return runCLI([agent.cli, agent.printFlag, fullPrompt, ...(agent.extraFlags ?? [])])
 }
 
 module.exports = { run }

@@ -26,11 +26,50 @@ class SessionManager {
         history: [],
         lastActivity: Date.now(),
         taskCount: 0,
+        onboarding: null,
       }
       this._sessions.set(key, session)
       logger.debug(`Session created for user ${userId} (agent: ${session.agent})`)
     }
     return this._sessions.get(key)
+  }
+
+  startOnboarding(userId, pendingMessage) {
+    const session = this.getOrCreate(userId)
+    session.onboarding = {
+      step: 'ask_human_name',
+      answers: {},
+      pendingMessage: pendingMessage || null,
+    }
+    logger.debug(`Onboarding started for user ${userId}`)
+  }
+
+  getOnboarding(userId) {
+    const session = this.getOrCreate(userId)
+    return session.onboarding
+  }
+
+  advanceOnboarding(userId, answer) {
+    const steps = ['ask_human_name', 'ask_bot_name', 'ask_tone', 'ask_extra', 'done']
+    const session = this.getOrCreate(userId)
+    if (!session.onboarding) return { done: false, nextStep: null }
+
+    const currentStep = session.onboarding.step
+    if (answer !== null && answer !== undefined) {
+      session.onboarding.answers[currentStep] = answer
+    }
+
+    const currentIdx = steps.indexOf(currentStep)
+    const nextStep = steps[currentIdx + 1] ?? 'done'
+    session.onboarding.step = nextStep
+
+    return { done: nextStep === 'done', nextStep }
+  }
+
+  clearOnboarding(userId) {
+    const session = this.getOrCreate(userId)
+    session.onboarding = null
+    logger.debug(`Onboarding cleared for user ${userId}`)
   }
 
   /**

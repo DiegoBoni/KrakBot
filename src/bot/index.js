@@ -9,6 +9,12 @@ const {
   handleClearHistory,
   handleTask,
   handlePing,
+  handleSoul,
+  handleReloadSoul,
+  handleSkip,
+  handleRemember,
+  handleMemories,
+  handleForget,
 } = require('./handlers')
 const logger = require('../utils/logger')
 
@@ -40,6 +46,14 @@ function createBot() {
     const agentArg = parts[1] ?? null
     return handlePing(ctx, agentArg)
   })
+
+  // Soul & memory commands
+  bot.command('soul',       handleSoul)
+  bot.command('reloadsoul', handleReloadSoul)
+  bot.command('skip',       handleSkip)
+  bot.command('remember',   handleRemember)
+  bot.command('memories',   handleMemories)
+  bot.command('forget',     handleForget)
 
   // ─── Text messages → task dispatch ────────────────────────────────────────
   bot.on('text', handleTask)
