@@ -18,7 +18,7 @@
 ## Instalación rápida
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/KrakBot/main/setup.sh | bash
+curl -fsSL https://raw.githubusercontent.com/DiegoBoni/KrakBot/main/setup.sh | bash
 ```
 
 El script interactivo:
@@ -31,7 +31,7 @@ El script interactivo:
 **Instalación manual** (si preferís hacerlo a mano):
 
 ```bash
-git clone https://github.com/BoniBot/KrakBot
+git clone https://github.com/DiegoBoni/KrakBot
 cd KrakBot
 cp .env.example .env   # editá con tu token y config
 npm install
