@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Environment secrets
+.env
+
+# AI agent config & context (local-only)
+.ai/
+.claude/
+.codex/
+.gemini/
+
+# Agent instruction files (contain system prompts / internal docs)
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+
+# macOS metadata
+.DS_Store
