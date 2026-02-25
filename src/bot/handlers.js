@@ -444,11 +444,10 @@ async function handleVoice(ctx) {
     clearInterval(heartbeatInterval)
     heartbeatInterval = null
 
-    // Show transcript in the status message
+    // Show transcript in the status message (plain text to avoid Markdown parse errors)
     await ctx.telegram.editMessageText(
       ctx.chat.id, statusMsg.message_id, undefined,
-      `📝 *Transcripción:* ${transcript}`,
-      { parse_mode: 'Markdown' }
+      `📝 Transcripción:\n${transcript}`
     ).catch(() => {})
     statusMsg = null // keep it visible — don't delete
 
