@@ -52,8 +52,7 @@ function runWhisper(audioPath, outputDir) {
       audioPath,
       '--model', model,
       '--language', language,
-      '--output_format', 'txt',
-      '--output_dir', outputDir,
+      '--output-dir', outputDir,
     ]
     logger.debug(`Spawning: mlx_whisper ${args.join(' ')}`)
 
@@ -130,16 +129,22 @@ async function transcribe(telegram, fileId) {
   const downloadUrl = `https://api.telegram.org/file/bot${token}/${fileInfo.file_path}`
   await downloadFile(downloadUrl, tempFile)
 
-  const txtFile = path.join(tempDir, `${baseName}.txt`)
-
   try {
     await runWhisper(tempFile, tempDir)
 
     let transcript = ''
+
+    // mlx_whisper outputs JSON by default; fall back to .txt if present
     try {
-      transcript = (await fs.promises.readFile(txtFile, 'utf8')).trim()
+      const jsonContent = await fs.promises.readFile(path.join(tempDir, `${baseName}.json`), 'utf8')
+      const parsed = JSON.parse(jsonContent)
+      transcript = (parsed.text || parsed.segments?.map((s) => s.text).join(' ') || '').trim()
     } catch {
-      // whisper didn't produce the .txt — treat as empty
+      try {
+        transcript = (await fs.promises.readFile(path.join(tempDir, `${baseName}.txt`), 'utf8')).trim()
+      } catch {
+        // no output file — treat as empty
+      }
     }
 
     if (!transcript) {
