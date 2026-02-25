@@ -6,7 +6,7 @@ const logger = require('./logger')
 
 const DEFAULT_TEMP_DIR = '/tmp/krakbot-audio'
 const DEFAULT_MAX_SIZE_MB = 25
-const DEFAULT_MODEL = 'base'
+const DEFAULT_MODEL = 'mlx-community/whisper-base-mlx'
 const DEFAULT_LANGUAGE = 'es'
 const WHISPER_TIMEOUT_MS = 120_000
 
