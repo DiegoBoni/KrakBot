@@ -8,6 +8,7 @@ const {
   handleSession,
   handleClearHistory,
   handleTask,
+  handleVoice,
   handlePing,
   handleSoul,
   handleReloadSoul,
@@ -57,6 +58,10 @@ function createBot() {
 
   // ─── Text messages → task dispatch ────────────────────────────────────────
   bot.on('text', handleTask)
+
+  // ─── Voice / audio messages → transcription + dispatch ────────────────────
+  bot.on('voice', handleVoice)
+  bot.on('audio', handleVoice)
 
   // ─── Global error handler ─────────────────────────────────────────────────
   bot.catch(async (err, ctx) => {

@@ -5,6 +5,7 @@ const sessionManager = require('./utils/sessionManager')
 const logger = require('./utils/logger')
 const { validateAll } = require('./utils/cliValidator')
 const { AGENTS } = require('./agents/router')
+const { ensureTempDir, checkWhisper } = require('./utils/audioTranscriber')
 
 async function main() {
   logger.info('🚀 Telegram AI Gateway arrancando...')
@@ -12,6 +13,15 @@ async function main() {
   // Validate CLI binaries and API key env vars before accepting requests.
   // Non-fatal: bot still launches even if some CLIs are missing.
   global.__cliStatus = validateAll(AGENTS)
+
+  // Ensure audio temp dir exists and check whisper availability (non-fatal).
+  await ensureTempDir()
+  const whisper = await checkWhisper()
+  if (whisper.found) {
+    logger.info('🎙️ mlx_whisper encontrado — transcripción de audio disponible')
+  } else {
+    logger.warn('mlx_whisper no encontrado — transcripción de audio no disponible')
+  }
 
   const bot = createBot()
 

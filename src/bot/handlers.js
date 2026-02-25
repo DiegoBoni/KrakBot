@@ -3,6 +3,7 @@ const sessionManager = require('../utils/sessionManager')
 const soulManager = require('../utils/soulManager')
 const memoryManager = require('../utils/memoryManager')
 const logger = require('../utils/logger')
+const { transcribe, checkWhisper } = require('../utils/audioTranscriber')
 
 const MAX_RESPONSE_LENGTH = parseInt(process.env.MAX_RESPONSE_LENGTH) || 4000
 
@@ -407,10 +408,96 @@ async function handleTask(ctx) {
   }
 }
 
+// ─── Voice / audio handler ────────────────────────────────────────────────────
+
+async function handleVoice(ctx) {
+  const userId = ctx.from.id
+  const session = sessionManager.getOrCreate(userId)
+  const voiceOrAudio = ctx.message.voice || ctx.message.audio
+  if (!voiceOrAudio) return
+
+  // Early size check (avoids download if Telegram already sent file_size)
+  const maxMb = parseFloat(process.env.MAX_AUDIO_SIZE_MB) || 25
+  if (voiceOrAudio.file_size && voiceOrAudio.file_size > maxMb * 1024 * 1024) {
+    await ctx.reply(`⚠️ El audio supera el límite de ${maxMb} MB. Enviá un audio más corto.`)
+    return
+  }
+
+  let statusMsg = null
+  let heartbeatInterval = null
+
+  try {
+    statusMsg = await ctx.reply('🎙️ Transcribiendo audio...')
+
+    const startTime = Date.now()
+    heartbeatInterval = setInterval(async () => {
+      const elapsed = Math.round((Date.now() - startTime) / 1000)
+      if (statusMsg) {
+        await ctx.telegram.editMessageText(
+          ctx.chat.id, statusMsg.message_id, undefined,
+          `🎙️ Transcribiendo audio... (${elapsed}s)`
+        ).catch(() => {})
+      }
+    }, 10_000)
+
+    const transcript = await transcribe(ctx.telegram, voiceOrAudio.file_id)
+    clearInterval(heartbeatInterval)
+    heartbeatInterval = null
+
+    // Show transcript in the status message
+    await ctx.telegram.editMessageText(
+      ctx.chat.id, statusMsg.message_id, undefined,
+      `📝 *Transcripción:* ${transcript}`,
+      { parse_mode: 'Markdown' }
+    ).catch(() => {})
+    statusMsg = null // keep it visible — don't delete
+
+    // Dispatch transcript to the active AI agent
+    const response = await dispatch(null, transcript, session)
+    sessionManager.addToHistory(userId, 'user', transcript)
+    sessionManager.addToHistory(userId, 'assistant', response)
+
+    const chunks = splitMessage(response, MAX_RESPONSE_LENGTH)
+    for (const chunk of chunks) {
+      await sendWithFallback(ctx, chunk)
+    }
+  } catch (err) {
+    clearInterval(heartbeatInterval)
+    logger.error(`Audio transcription failed for user ${userId}: ${err.message}`)
+
+    let msg = '❌ Error al transcribir el audio.'
+    if (err.isEnoent) {
+      msg = '⚠️ El motor de transcripción no está instalado. Pedile al operador que instale mlx-whisper.'
+    } else if (err.isSizeLimit) {
+      msg = err.message
+    } else if (err.isEmpty) {
+      msg = '⚠️ No se pudo transcribir el audio. Verificá que haya voz clara en el mensaje.'
+    }
+
+    await ctx.reply(msg)
+
+    // Delete the "Transcribiendo..." status message if still up
+    if (statusMsg) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {})
+    }
+  }
+}
+
 // ─── Ping / health-check ───────────────────────────────────────────────────────
 
 async function handlePing(ctx, agentKeyArg) {
   const { AGENTS, dispatch } = require('../agents/router')
+
+  // Special case: /ping whisper
+  if (agentKeyArg === 'whisper') {
+    const { found, latencyMs } = await checkWhisper()
+    const status = found
+      ? `✅ mlx_whisper encontrado (latencia: ${latencyMs}ms)`
+      : `❌ mlx_whisper no encontrado — instalá con: \`pip install mlx-whisper\``
+    await ctx.reply(`🎙️ *Whisper status:*\n${status}`, { parse_mode: 'Markdown' })
+    return
+  }
+
   const targets = agentKeyArg
     ? [agentKeyArg].filter((k) => AGENTS[k])
     : Object.keys(AGENTS)
@@ -480,6 +567,7 @@ module.exports = {
   handleSession,
   handleClearHistory,
   handleTask,
+  handleVoice,
   handlePing,
   handleSoul,
   handleReloadSoul,
