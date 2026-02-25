@@ -73,7 +73,7 @@ function runWhisper(audioPath, outputDir) {
     child.stdout.on('data', (c) => { stdout += c.toString() })
     child.stderr.on('data', (c) => {
       stderr += c.toString()
-      logger.debug(`[whisper] ${c.toString().slice(0, 120).trimEnd()}`)
+      logger.debug(`[whisper] ${c.toString().trimEnd()}`)
     })
     child.stdin.end()
 
@@ -95,6 +95,7 @@ function runWhisper(audioPath, outputDir) {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      if (code !== 0) logger.error(`[whisper] exit code ${code}\n${stderr}`)
       resolve({ stdout, stderr, code })
     })
   })
