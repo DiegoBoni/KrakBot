@@ -94,7 +94,7 @@ function listAgents() {
  * @param {object}      session   Session object from sessionManager
  * @returns {Promise<string>}
  */
-async function dispatch(agentKey, prompt, session) {
+async function dispatch(agentKey, prompt, session, signal) {
   const key = agentKey || session.agent
   const agent = getAgentInfo(key)
 
@@ -106,7 +106,7 @@ async function dispatch(agentKey, prompt, session) {
 
   // Require the agent module lazily to keep the dispatch function agnostic
   const agentModule = require(`./${key}`)
-  return agentModule.run(prompt, session)
+  return agentModule.run(prompt, session, signal)
 }
 
 module.exports = { AGENTS, dispatch, resolveAgent, getAgentInfo, listAgents }

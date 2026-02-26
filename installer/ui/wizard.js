@@ -10,7 +10,6 @@ const state = {
     claudeModel: 'claude-sonnet-4-6',
     geminiModel: 'gemini-2.5-pro',
     codexModel: 'gpt-5.2-codex',
-    timeout: 120000,
     debug: false,
   },
   cliStatus: { claude: null, gemini: null, codex: null },
@@ -18,6 +17,8 @@ const state = {
   hasGit: false,
   npmInstallDone: false,
   botUsername: null,
+  isAppleSilicon: false,
+  audioTools: { ffmpeg: false, mlxWhisper: false },
 }
 
 // Detect port from current URL (bootstrap may use 7337-7339)
@@ -41,6 +42,12 @@ function clearTerminal(id) {
   if (!box) return
   box.innerHTML = ''
   box.hidden = true
+}
+
+function copyToClipboard(text) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).catch(() => {})
+  }
 }
 
 // ─── SSE streaming ────────────────────────────────────────────────────────────
@@ -83,7 +90,7 @@ function updateProgress(step) {
     if (n < step) dot.classList.add('done')
     else if (n === step) dot.classList.add('active')
   })
-  for (let i = 1; i <= 6; i++) {
+  for (let i = 1; i <= 7; i++) {
     const line = $(`line-${i}-${i + 1}`)
     if (line) {
       line.classList.toggle('done', i < step)
@@ -114,6 +121,7 @@ function onEnterStep(n) {
     case 5: enterStep5(); break
     case 6: enterStep6(); break
     case 7: enterStep7(); break
+    case 8: enterStep8(); break
   }
 }
 
@@ -219,13 +227,6 @@ async function loadExistingEnv() {
     if (env.CLAUDE_MODEL)     { const s = $('model-claude');  if (s) s.value = env.CLAUDE_MODEL }
     if (env.GEMINI_MODEL)     { const s = $('model-gemini');  if (s) s.value = env.GEMINI_MODEL }
     if (env.CODEX_MODEL)      { const s = $('model-codex');   if (s) s.value = env.CODEX_MODEL }
-    if (env.CLI_TIMEOUT)      {
-      const slider = $('timeout-slider')
-      if (slider) {
-        slider.value = env.CLI_TIMEOUT
-        $('timeout-label').textContent = `${Math.round(parseInt(env.CLI_TIMEOUT) / 1000)}s`
-      }
-    }
     if (env.DEBUG)            { const t = $('debug-toggle'); if (t) t.checked = env.DEBUG === 'true' }
   } catch (err) {
     console.warn('No se pudo cargar el .env actual:', err)
@@ -333,16 +334,82 @@ function validateAgentStep() {
   warning.style.display = anyReady ? 'none' : 'block'
 }
 
-// ─── Step 5: Config ───────────────────────────────────────────────────────────
-function enterStep5() {
-  const slider = $('timeout-slider')
-  slider.addEventListener('input', () => {
-    $('timeout-label').textContent = `${Math.round(parseInt(slider.value) / 1000)}s`
+// ─── Step 5: Audio ────────────────────────────────────────────────────────────
+async function enterStep5() {
+  try {
+    const res = await fetch(`${BASE}/api/status`)
+    const data = await res.json()
+
+    state.isAppleSilicon = data.platform === 'darwin' && data.arch === 'arm64'
+    state.audioTools.ffmpeg     = data.audioTools?.ffmpeg     ?? false
+    state.audioTools.mlxWhisper = data.audioTools?.mlxWhisper ?? false
+
+    if (state.isAppleSilicon) {
+      $('audio-platform-badge').textContent = '🍎 Apple Silicon detectado — transcripción de audio disponible'
+      $('audio-apple-section').hidden = false
+      $('audio-unsupported-section').hidden = true
+      updateAudioItem('ffmpeg',     state.audioTools.ffmpeg)
+      updateAudioItem('mlxwhisper', state.audioTools.mlxWhisper)
+    } else {
+      $('audio-platform-badge').textContent = `💻 Plataforma: ${data.platform} ${data.arch}`
+      $('audio-apple-section').hidden = true
+      $('audio-unsupported-section').hidden = false
+    }
+  } catch (err) {
+    console.error('Error cargando estado de audio:', err)
+  }
+}
+
+function updateAudioItem(key, found) {
+  const icon   = $(`audio-icon-${key}`)
+  const detail = $(`audio-detail-${key}`)
+  const btn    = $(`btn-install-${key}`)
+  if (!icon) return
+  if (found) {
+    icon.textContent   = '✅'
+    detail.textContent = 'instalado'
+    if (btn) btn.hidden = true
+  } else {
+    icon.textContent   = '❌'
+    detail.textContent = 'no encontrado'
+    if (btn) btn.hidden = false
+  }
+}
+
+function setupInstallAudio(key, tool) {
+  const btn = $(`btn-install-${key}`)
+  if (!btn) return
+  btn.addEventListener('click', async () => {
+    btn.disabled = true
+    btn.textContent = 'Instalando...'
+    clearTerminal(`terminal-audio-${key}`)
+    await streamSSE(
+      `${BASE}/api/install-audio`,
+      { tool },
+      (line) => appendTerminal(`terminal-audio-${key}`, line),
+      async () => {
+        btn.textContent = 'Reintentar'
+        btn.disabled = false
+        try {
+          const res  = await fetch(`${BASE}/api/status`)
+          const data = await res.json()
+          const found = key === 'ffmpeg'
+            ? data.audioTools?.ffmpeg
+            : data.audioTools?.mlxWhisper
+          if (key === 'ffmpeg') state.audioTools.ffmpeg = found
+          else state.audioTools.mlxWhisper = found
+          updateAudioItem(key, found)
+        } catch {}
+      }
+    )
   })
 }
 
-// ─── Step 6: Resumen ──────────────────────────────────────────────────────────
-function enterStep6() {
+// ─── Step 6: Config ───────────────────────────────────────────────────────────
+function enterStep6() {}
+
+// ─── Step 7: Resumen ──────────────────────────────────────────────────────────
+function enterStep7() {
   const config = buildConfig()
   state.config = config
 
@@ -355,8 +422,8 @@ function enterStep6() {
     ['Modelo Claude', config.claudeModel],
     ['Modelo Gemini', config.geminiModel],
     ['Modelo Codex', config.codexModel || 'default CLI'],
-    ['Timeout', `${Math.round(config.timeout / 1000)}s`],
     ['Debug', config.debug ? 'Activado' : 'Desactivado'],
+    ...(config.includeAudio ? [['Audio (Whisper)', `${config.whisperModel} — idioma: ${config.whisperLanguage}`]] : []),
   ]
 
   summary.innerHTML = items.map(([k, v]) =>
@@ -375,8 +442,10 @@ function buildConfig() {
     claudeModel:    $('model-claude').value || 'claude-sonnet-4-6',
     geminiModel:    $('model-gemini').value || 'gemini-2.5-pro',
     codexModel:     $('model-codex').value || 'gpt-5.2-codex',
-    timeout:        parseInt($('timeout-slider').value) || 120000,
     debug:          $('debug-toggle').checked,
+    includeAudio:   state.isAppleSilicon && state.audioTools.mlxWhisper,
+    whisperLanguage: 'es',
+    whisperModel:   'mlx-community/whisper-base-mlx',
   }
 }
 
@@ -389,6 +458,11 @@ function maskToken(token) {
 
 function buildEnvPreview(config) {
   const ts = new Date().toISOString().slice(0, 16).replace('T', ' ')
+  const audioBlock = config.includeAudio ? `
+WHISPER_MODEL=${config.whisperModel}
+WHISPER_LANGUAGE=${config.whisperLanguage}
+AUDIO_TEMP_DIR=/tmp/krakbot-audio
+MAX_AUDIO_SIZE_MB=25` : ''
   return `# Generado por KrakBot Installer — ${ts}
 
 TELEGRAM_TOKEN=${maskToken(config.token)}
@@ -396,7 +470,6 @@ TELEGRAM_TOKEN=${maskToken(config.token)}
 DEFAULT_AGENT=${config.defaultAgent}
 AUTHORIZED_USERS=${config.authorizedUsers || ''}
 
-CLI_TIMEOUT=${config.timeout}
 DEBUG=${config.debug}
 
 CLAUDE_CLI_PATH=claude
@@ -407,11 +480,50 @@ CLAUDE_MODEL=${config.claudeModel}
 GEMINI_MODEL=${config.geminiModel}
 CODEX_MODEL=${config.codexModel || 'gpt-5.2-codex'}
 
-MAX_RESPONSE_LENGTH=4000`
+MAX_RESPONSE_LENGTH=4000${audioBlock}`
 }
 
-// ─── Step 7: Arranque ─────────────────────────────────────────────────────────
-async function enterStep7() {
+// ─── Step 8: Autostart ────────────────────────────────────────────────────────
+function setupAutostart() {
+  const toggle = $('autostart-toggle')
+  if (!toggle) return
+
+  toggle.addEventListener('change', async () => {
+    if (!toggle.checked) return
+    toggle.disabled = true
+
+    clearTerminal('terminal-autostart')
+    $('terminal-autostart').hidden = false
+
+    let sudoLine = null
+
+    await streamSSE(
+      `${BASE}/api/setup-autostart`,
+      null,
+      (line) => {
+        if (line.startsWith('SUDO_CMD: ')) {
+          sudoLine = line.slice('SUDO_CMD: '.length).trim()
+          appendTerminal('terminal-autostart', '⚠️ ' + sudoLine)
+        } else {
+          appendTerminal('terminal-autostart', line)
+        }
+      },
+      () => {
+        toggle.disabled = false
+        $('autostart-commands').hidden = false
+
+        if (sudoLine) {
+          $('sudo-cmd-text').textContent = sudoLine
+          $('btn-copy-sudo').onclick = () => copyToClipboard(sudoLine)
+          $('autostart-sudo-block').hidden = false
+        }
+      }
+    )
+  }, { once: true })
+}
+
+// ─── Step 8: Arranque ─────────────────────────────────────────────────────────
+async function enterStep8() {
   const terminal = $('terminal-start')
   terminal.hidden = false
 
@@ -437,7 +549,7 @@ async function enterStep7() {
   }
 
   appendTerminal('terminal-start', '')
-  appendTerminal('terminal-start', '🚀 Iniciando KrakBot (npm start)...')
+  appendTerminal('terminal-start', '🚀 Iniciando KrakBot con pm2...')
   appendTerminal('terminal-start', '')
 
   let botStarted = false
@@ -457,7 +569,8 @@ async function enterStep7() {
       appendTerminal('terminal-start', '─────────────────────────────────')
 
       $('success-msg').hidden = false
-      $('pm2-details').hidden = false
+      $('autostart-section').hidden = false
+      setupAutostart()
 
       if (state.botUsername) {
         const btnBot = $('btn-open-bot')
@@ -568,18 +681,24 @@ async function init() {
     goToStep(5)
   })
 
-  // Step 5
+  // Step 5 — Audio
+  setupInstallAudio('ffmpeg',     'ffmpeg')
+  setupInstallAudio('mlxwhisper', 'mlx-whisper')
   $('btn-step5-back').addEventListener('click', () => goToStep(4))
   $('btn-step5-next').addEventListener('click', () => goToStep(6))
 
-  // Step 6
+  // Step 6 — Config
   $('btn-step6-back').addEventListener('click', () => goToStep(5))
+  $('btn-step6-next').addEventListener('click', () => goToStep(7))
+
+  // Step 7 — Resumen
+  $('btn-step7-back').addEventListener('click', () => goToStep(6))
   $('btn-confirm').addEventListener('click', () => {
     state.config = buildConfig()
-    goToStep(7)
+    goToStep(8)
   })
 
-  // Step 7
+  // Step 8 — Arranque
   $('btn-shutdown').addEventListener('click', async () => {
     try {
       await fetch(`${BASE}/api/shutdown`, { method: 'POST' })

@@ -27,6 +27,7 @@ class SessionManager {
         lastActivity: Date.now(),
         taskCount: 0,
         onboarding: null,
+        backgroundTask: null,
       }
       this._sessions.set(key, session)
       logger.debug(`Session created for user ${userId} (agent: ${session.agent})`)
@@ -122,6 +123,37 @@ class SessionManager {
       }
     }
     if (removed > 0) logger.info(`Session cleanup: removed ${removed} inactive session(s)`)
+  }
+
+  /**
+   * Stores a background task descriptor for a user.
+   * @param {number|string} userId
+   * @param {{ agentKey, statusMsgId, transitionMsgId, cancel, startTime, originalPrompt }} data
+   */
+  setBackgroundTask(userId, data) {
+    const session = this.getOrCreate(userId)
+    session.backgroundTask = data
+    logger.debug(`Background task set for user ${userId}`)
+  }
+
+  /**
+   * Returns the current background task for a user, or null.
+   * @param {number|string} userId
+   * @returns {object|null}
+   */
+  getBackgroundTask(userId) {
+    const session = this.getOrCreate(userId)
+    return session.backgroundTask ?? null
+  }
+
+  /**
+   * Clears the background task for a user.
+   * @param {number|string} userId
+   */
+  clearBackgroundTask(userId) {
+    const session = this.getOrCreate(userId)
+    session.backgroundTask = null
+    logger.debug(`Background task cleared for user ${userId}`)
   }
 
   /**

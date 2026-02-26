@@ -10,6 +10,35 @@ const MAX_RESPONSE_LENGTH = parseInt(process.env.MAX_RESPONSE_LENGTH) || 4000
 // Regex to detect "@agentAlias task" at the start of a message
 const MENTION_RE = /^@(\w+)\s+([\s\S]+)$/
 
+// ─── Vibe phrases (shown while agent is thinking > 60s) ────────────────────────
+
+const VIBE_PHRASES = [
+  '🔥 Generando código a full velocidad...',
+  '🧠 Pensando como un pulpo con cafeína...',
+  '⚡ Procesando... el agente está en modo beast.',
+  '🪄 Mágicamente cocinando tu respuesta...',
+  '🚀 La tarea es compleja pero ya viene...',
+  '💡 Analizando cada detalle con cuidado...',
+  '🔮 El oráculo está consultando el universo...',
+  '🐙 Ocho tentáculos trabajando en simultáneo...',
+  '🎯 Apuntando directo al objetivo...',
+  '🏗️ Construyendo la respuesta ladrillo por ladrillo...',
+  '🌊 Navegando el contexto... hay mucha data.',
+  '⚙️ Motores encendidos, paciencia que ya llega...',
+  '🧩 Armando las piezas del rompecabezas...',
+  '🦑 El kraken está despierto y trabajando...',
+]
+
+/**
+ * Returns a random vibe phrase, avoiding repeating the last one.
+ * @param {number} lastIdx  Index of the previously shown phrase (-1 for none)
+ * @returns {string}
+ */
+function randomVibe(lastIdx) {
+  const available = VIBE_PHRASES.filter((_, i) => i !== lastIdx)
+  return available[Math.floor(Math.random() * available.length)]
+}
+
 // ─── Onboarding ────────────────────────────────────────────────────────────────
 
 const ONBOARDING_QUESTIONS = {
@@ -197,7 +226,19 @@ async function handleSession(ctx) {
 }
 
 async function handleClearHistory(ctx) {
-  sessionManager.clearHistory(ctx.from.id)
+  const userId = ctx.from.id
+  const bg = sessionManager.getBackgroundTask(userId)
+  if (bg) {
+    if (typeof bg.cancel === 'function') bg.cancel()
+    if (bg.statusMsgId) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, bg.statusMsgId).catch(() => {})
+    }
+    if (bg.transitionMsgId) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, bg.transitionMsgId).catch(() => {})
+    }
+    sessionManager.clearBackgroundTask(userId)
+  }
+  sessionManager.clearHistory(userId)
   await ctx.reply('🗑 Historial borrado. La siguiente respuesta comenzará sin contexto previo.')
 }
 
@@ -336,6 +377,38 @@ async function handleTask(ctx) {
     return handleOnboarding(ctx, null)
   }
 
+  // T9: If a background task is already running, route this message to the
+  // continuity agent so the user isn't left hanging. The original task keeps
+  // running and will deliver its response when it finishes.
+  const existingBg = sessionManager.getBackgroundTask(userId)
+  if (existingBg) {
+    let contStatusMsg = null
+    try {
+      const contAgent = getAgentInfo(session.agent)
+      contStatusMsg = await ctx.reply(
+        `${contAgent.emoji} Procesando con *${contAgent.name}*...`,
+        { parse_mode: 'Markdown' }
+      ).catch(() => null)
+
+      const response = await dispatch(session.agent, text, session)
+      sessionManager.addToHistory(userId, 'user', text)
+      sessionManager.addToHistory(userId, 'assistant', response)
+
+      const chunks = splitMessage(response, MAX_RESPONSE_LENGTH)
+      for (const chunk of chunks) {
+        await sendWithFallback(ctx, chunk)
+      }
+    } catch (err) {
+      logger.error(`Continuity task failed for user ${userId}: ${err.message}`)
+      await ctx.reply(`❌ ${(err.message ?? 'Error').split('\n')[0].slice(0, 200)}`).catch(() => {})
+    } finally {
+      if (contStatusMsg) {
+        await ctx.telegram.deleteMessage(ctx.chat.id, contStatusMsg.message_id).catch(() => {})
+      }
+    }
+    return
+  }
+
   // Parse "@alias task" mention at the start of the message
   let agentKey = null
   let prompt = text
@@ -351,47 +424,113 @@ async function handleTask(ctx) {
     }
   }
 
-  // Show "processing..." status message
-  let statusMsg
-  let heartbeatInterval
+  // T8: 3-phase timer system
+  const controller = new AbortController()
+  const { signal } = controller
+
+  let statusMsg = null
+  let vibePhaseTimer = null
+  let vibeInterval = null
+  let bgPhaseTimer = null
+  let lastVibeIdx = -1
+
+  const clearAllTimers = () => {
+    clearTimeout(vibePhaseTimer)
+    clearInterval(vibeInterval)
+    clearTimeout(bgPhaseTimer)
+  }
+
   try {
     const activeAgent = getAgentInfo(agentKey || session.agent)
     statusMsg = await ctx.reply(
       `${activeAgent.emoji} Procesando con *${activeAgent.name}*...`,
       { parse_mode: 'Markdown' }
-    )
-    let elapsed = 0
-    heartbeatInterval = setInterval(async () => {
-      elapsed += 30
-      if (statusMsg) {
-        await ctx.telegram.editMessageText(
-          ctx.chat.id,
-          statusMsg.message_id,
-          undefined,
-          `⏳ *${activeAgent.name}* procesando... (${elapsed}s)`,
-          { parse_mode: 'Markdown' }
-        ).catch(() => {})
-      }
-    }, 30_000)
-  } catch {
-    // If status message fails, continue anyway
-  }
+    ).catch(() => null)
 
-  try {
-    const response = await dispatch(agentKey, prompt, session)
-    clearInterval(heartbeatInterval)
+    // Set background task immediately so any message the user sends while
+    // this task runs is routed to the continuity agent — not a duplicate dispatch.
+    sessionManager.setBackgroundTask(userId, {
+      agentKey: agentKey || session.agent,
+      statusMsgId: statusMsg?.message_id,
+      transitionMsgId: null, // populated at 120s if task is still running
+      cancel: () => controller.abort(),
+      startTime: Date.now(),
+      originalPrompt: prompt,
+    })
+
+    // Phase 2 (60s): Start rotating vibe phrases every 15s
+    vibePhaseTimer = setTimeout(() => {
+      const showVibe = async () => {
+        const phrase = randomVibe(lastVibeIdx)
+        lastVibeIdx = VIBE_PHRASES.indexOf(phrase)
+        if (statusMsg) {
+          await ctx.telegram.editMessageText(
+            ctx.chat.id, statusMsg.message_id, undefined,
+            `${activeAgent.emoji} ${phrase}`,
+            { parse_mode: 'Markdown' }
+          ).catch(() => {})
+        }
+      }
+      showVibe()
+      vibeInterval = setInterval(showVibe, 15_000)
+
+      // Phase 3 (120s total): Send transition message and mark bg mode active
+      bgPhaseTimer = setTimeout(async () => {
+        clearInterval(vibeInterval)
+        vibeInterval = null
+
+        const bg = sessionManager.getBackgroundTask(userId)
+        if (!bg) return // task already completed before 120s — skip transition
+
+        let transitionMsg = null
+        try {
+          transitionMsg = await ctx.reply(
+            `🐙⚡ *${activeAgent.name}* sigue trabajando en tu tarea. Mientras tanto, podés seguir hablando conmigo.`,
+            { parse_mode: 'Markdown' }
+          )
+        } catch {}
+
+        if (transitionMsg) bg.transitionMsgId = transitionMsg.message_id
+      }, 60_000) // 60s after phase 2 = 120s total
+    }, 60_000)
+
+    const response = await dispatch(agentKey, prompt, session, signal)
+    clearAllTimers()
 
     if (!agentKey) {
       sessionManager.addToHistory(userId, 'user', prompt)
       sessionManager.addToHistory(userId, 'assistant', response)
     }
 
-    const chunks = splitMessage(response, MAX_RESPONSE_LENGTH)
-    for (const chunk of chunks) {
-      await sendWithFallback(ctx, chunk)
+    // Deliver response — prefix only if the transition message was shown (120s mark was reached)
+    const bg = sessionManager.getBackgroundTask(userId)
+    if (bg?.transitionMsgId) {
+      const prefix = `✅ *${activeAgent.name}* terminó:\n\n`
+      const chunks = splitMessage(prefix + response, MAX_RESPONSE_LENGTH)
+      for (const chunk of chunks) {
+        await sendWithFallback(ctx, chunk)
+      }
+      await ctx.telegram.deleteMessage(ctx.chat.id, bg.transitionMsgId).catch(() => {})
+    } else {
+      const chunks = splitMessage(response, MAX_RESPONSE_LENGTH)
+      for (const chunk of chunks) {
+        await sendWithFallback(ctx, chunk)
+      }
     }
+    sessionManager.clearBackgroundTask(userId)
   } catch (err) {
-    clearInterval(heartbeatInterval)
+    clearAllTimers()
+
+    // Clean up background task if it was set before the error
+    const bgOnError = sessionManager.getBackgroundTask(userId)
+    if (bgOnError?.transitionMsgId) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, bgOnError.transitionMsgId).catch(() => {})
+    }
+    if (bgOnError) sessionManager.clearBackgroundTask(userId)
+
+    // Cancelled by /limpiar — cleanup already done there
+    if (err.cancelled) return
+
     logger.error(`Task failed for user ${userId}: ${err.message}`)
     const agentName = getAgentInfo(agentKey || session.agent)?.name ?? 'Agente'
     const shortMsg = (err.message ?? 'Error desconocido').split('\n')[0].slice(0, 200)
@@ -401,7 +540,7 @@ async function handleTask(ctx) {
       await ctx.reply(`❌ ${agentName} falló: ${shortMsg}`)
     }
   } finally {
-    clearInterval(heartbeatInterval)
+    clearAllTimers()
     if (statusMsg) {
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {})
     }

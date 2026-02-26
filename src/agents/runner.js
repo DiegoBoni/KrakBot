@@ -1,22 +1,24 @@
 const { spawn } = require('child_process')
 const logger = require('../utils/logger')
 
-const DEFAULT_TIMEOUT = 120_000
+// Hard safety ceiling — 30 minutes. No user-configurable timeout.
+const SAFETY_TIMEOUT = 30 * 60 * 1000
 
 /**
  * Runs a CLI command with the given arguments, feeding input via stdin.
- * Captures stdout and stderr, enforces a configurable timeout.
+ * Captures stdout and stderr, enforces a 30-minute hard safety timeout.
+ * Optionally accepts an AbortSignal to cancel early.
  *
- * @param {string[]} command  [executable, ...args]
- * @param {string}   input    Text to write to stdin
+ * @param {string[]}     command  [executable, ...args]
+ * @param {string}       input    Text to write to stdin
+ * @param {AbortSignal}  signal   Optional signal to cancel the process
  * @returns {Promise<string>} stdout of the process
  */
-function runCLI(command, input) {
-  const timeout = parseInt(process.env.CLI_TIMEOUT) || DEFAULT_TIMEOUT
+function runCLI(command, input, signal) {
   const [bin, ...args] = command
 
   return new Promise((resolve, reject) => {
-    logger.debug(`Spawning: ${bin} ${args.join(' ')} (timeout: ${timeout}ms)`)
+    logger.debug(`Spawning: ${bin} ${args.join(' ')} (safety timeout: ${SAFETY_TIMEOUT / 1000}s)`)
 
     let stdout = ''
     let stderr = ''
@@ -34,14 +36,36 @@ function runCLI(command, input) {
       cwd: process.env.HOME || require('os').tmpdir(),
     })
 
+    const killChild = () => {
+      child.kill('SIGTERM')
+      setTimeout(() => child.kill('SIGKILL'), 2000)
+    }
+
     const timer = setTimeout(() => {
       if (settled) return
       settled = true
-      child.kill('SIGTERM')
-      // Hard kill after 2s if SIGTERM wasn't enough
-      setTimeout(() => child.kill('SIGKILL'), 2000)
-      reject(Object.assign(new Error(`Timeout: el agente tardó más de ${timeout / 1000}s.`), { timedOut: true }))
-    }, timeout)
+      killChild()
+      reject(Object.assign(new Error('Timeout: el agente tardó más de 30 minutos.'), { timedOut: true }))
+    }, SAFETY_TIMEOUT)
+
+    // Honour cancellation via AbortSignal
+    if (signal) {
+      if (signal.aborted) {
+        clearTimeout(timer)
+        killChild()
+        return reject(Object.assign(new Error('cancelled'), { cancelled: true }))
+      }
+      const onAbort = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        killChild()
+        reject(Object.assign(new Error('cancelled'), { cancelled: true }))
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      // Clean up listener when child exits normally
+      child.once('close', () => signal.removeEventListener('abort', onAbort))
+    }
 
     child.stdout.on('data', (chunk) => { stdout += chunk.toString() })
     child.stderr.on('data', (chunk) => {

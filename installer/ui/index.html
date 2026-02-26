@@ -31,11 +31,13 @@
     <div class="progress-line" id="line-3-4"></div>
     <div class="progress-dot" data-step="4" title="Agentes">4</div>
     <div class="progress-line" id="line-4-5"></div>
-    <div class="progress-dot" data-step="5" title="Config">5</div>
+    <div class="progress-dot" data-step="5" title="Audio">5</div>
     <div class="progress-line" id="line-5-6"></div>
-    <div class="progress-dot" data-step="6" title="Resumen">6</div>
+    <div class="progress-dot" data-step="6" title="Config">6</div>
     <div class="progress-line" id="line-6-7"></div>
-    <div class="progress-dot" data-step="7" title="Arranque">7</div>
+    <div class="progress-dot" data-step="7" title="Resumen">7</div>
+    <div class="progress-line" id="line-7-8"></div>
+    <div class="progress-dot" data-step="8" title="Arranque">8</div>
   </nav>
 
   <!-- ── Main ─────────────────────────────────────────────────────────────── -->
@@ -50,7 +52,7 @@
           para que podás hacer consultas desde tu teléfono con un mensaje.
         </p>
         <p style="margin-top:0.25rem;">
-          Este wizard te guía en 7 pasos para dejar el bot listo y funcionando.
+          Este wizard te guía en 8 pasos para dejar el bot listo y funcionando.
         </p>
 
         <div class="banner-warning" id="banner-reconfig" hidden>
@@ -256,8 +258,51 @@
       </div>
     </section>
 
-    <!-- ══ Step 5: Config avanzada ════════════════════════════════════════════ -->
+    <!-- ══ Step 5: Audio ══════════════════════════════════════════════════════ -->
     <section class="step" data-step="5">
+      <div class="card">
+        <h2>Dependencias de audio</h2>
+        <p>KrakBot puede transcribir mensajes de voz usando Whisper nativo de Apple Silicon.</p>
+
+        <div id="audio-platform-badge" style="margin-top:0.75rem; font-size:0.9rem; color:var(--text-muted);"></div>
+
+        <!-- Panel Apple Silicon (se muestra solo si arm64 + darwin) -->
+        <div id="audio-apple-section" hidden>
+          <ul class="check-list" style="margin-top:1rem;">
+            <li id="audio-item-ffmpeg">
+              <span class="check-icon" id="audio-icon-ffmpeg">⏳</span>
+              <span>ffmpeg</span>
+              <span class="check-detail" id="audio-detail-ffmpeg">verificando...</span>
+              <button class="btn btn-secondary btn-sm" id="btn-install-ffmpeg" hidden>Instalar</button>
+              <div class="terminal" id="terminal-audio-ffmpeg" hidden></div>
+            </li>
+            <li id="audio-item-mlxwhisper">
+              <span class="check-icon" id="audio-icon-mlxwhisper">⏳</span>
+              <span>mlx-whisper</span>
+              <span class="check-detail" id="audio-detail-mlxwhisper">verificando...</span>
+              <button class="btn btn-secondary btn-sm" id="btn-install-mlxwhisper" hidden>Instalar</button>
+              <div class="terminal" id="terminal-audio-mlxwhisper" hidden></div>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Panel plataforma no soportada -->
+        <div id="audio-unsupported-section" hidden>
+          <div class="banner-warning" style="margin-top:1rem;">
+            ⚠️ <strong>mlx-whisper requiere Apple Silicon (M1/M2/M3/M4).</strong><br>
+            En esta plataforma el audio no está disponible. Podés continuar igual — el resto del bot funciona perfectamente.
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-secondary" id="btn-step5-back">← Volver</button>
+          <button class="btn btn-primary" id="btn-step5-next">Siguiente →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ Step 6: Config avanzada ════════════════════════════════════════════ -->
+    <section class="step" data-step="6">
       <div class="card">
         <h2>Configuración avanzada</h2>
         <p>Los valores por defecto funcionan bien. Ajustá solo lo que necesitás.</p>
@@ -272,12 +317,6 @@
             </select>
           </div>
 
-          <div class="slider-row" style="margin-top:1rem;">
-            <label for="timeout-slider">Timeout por respuesta</label>
-            <input type="range" id="timeout-slider" min="30000" max="300000" step="10000" value="120000">
-            <span class="slider-value" id="timeout-label">120s</span>
-          </div>
-
           <div class="toggle-row" style="margin-top:0.75rem;">
             <label class="toggle">
               <input type="checkbox" id="debug-toggle">
@@ -289,14 +328,14 @@
         </div>
 
         <div class="btn-row">
-          <button class="btn btn-secondary" id="btn-step5-back">← Volver</button>
-          <button class="btn btn-primary" id="btn-step5-next">Siguiente →</button>
+          <button class="btn btn-secondary" id="btn-step6-back">← Volver</button>
+          <button class="btn btn-primary" id="btn-step6-next">Siguiente →</button>
         </div>
       </div>
     </section>
 
-    <!-- ══ Step 6: Resumen ════════════════════════════════════════════════════ -->
-    <section class="step" data-step="6">
+    <!-- ══ Step 7: Resumen ════════════════════════════════════════════════════ -->
+    <section class="step" data-step="7">
       <div class="card">
         <h2>Resumen de configuración</h2>
         <p>Revisá todo antes de escribir el <code>.env</code>.</p>
@@ -307,14 +346,14 @@
         <pre class="env-preview" id="env-preview"></pre>
 
         <div class="btn-row">
-          <button class="btn btn-secondary" id="btn-step6-back">← Volver</button>
+          <button class="btn btn-secondary" id="btn-step7-back">← Volver</button>
           <button class="btn btn-primary" id="btn-confirm">Confirmar y escribir configuración →</button>
         </div>
       </div>
     </section>
 
-    <!-- ══ Step 7: Arranque ═══════════════════════════════════════════════════ -->
-    <section class="step" data-step="7">
+    <!-- ══ Step 8: Arranque ═══════════════════════════════════════════════════ -->
+    <section class="step" data-step="8">
       <div class="card">
         <h2>Arrancando KrakBot</h2>
         <p>Escribiendo la configuración e iniciando el bot...</p>
@@ -326,20 +365,52 @@
           <div class="sub">Tu bot de Telegram está activo y listo para recibir mensajes.</div>
         </div>
 
-        <details id="pm2-details" style="margin-top:1rem;" hidden>
-          <summary>¿Cómo mantenerlo activo después de cerrar la terminal?</summary>
-          <div class="details-body">
-            <p>Para que el bot siga corriendo en segundo plano, podés usar <strong>pm2</strong>:</p>
-            <pre style="background:#000; color:var(--accent-cyan); padding:0.75rem; border-radius:4px; font-size:0.8rem; margin-top:0.5rem;">npm install -g pm2
-pm2 start npm --name krakbot -- start
-pm2 save
-pm2 startup</pre>
-            <p style="margin-top:0.5rem;">O con <strong>screen</strong>:</p>
-            <pre style="background:#000; color:var(--accent-cyan); padding:0.75rem; border-radius:4px; font-size:0.8rem; margin-top:0.5rem;">screen -S krakbot
-npm start
-# Ctrl+A, D para desacoplar</pre>
+        <div id="autostart-section" hidden style="margin-top:1.25rem;">
+          <div class="section-title">¿Mantener siempre encendido?</div>
+          <p style="font-size:0.875rem; margin-top:0.25rem; color:var(--text-muted);">
+            Activá esto para que KrakBot se reinicie automáticamente si se corta la luz o se reinicia el servidor.
+          </p>
+
+          <div class="toggle-row" style="margin-top:0.75rem;">
+            <label class="toggle">
+              <input type="checkbox" id="autostart-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+            <span style="font-size:0.875rem;">Siempre encendido (PM2 autostart)</span>
           </div>
-        </details>
+
+          <div class="terminal" id="terminal-autostart" hidden style="margin-top:0.75rem; max-height:200px;"></div>
+
+          <div id="autostart-commands" hidden style="margin-top:1rem;">
+            <div class="section-title">Comandos útiles</div>
+            <div class="cmd-row">
+              <span class="cmd-label">Apagar:</span>
+              <code>pm2 stop krakbot</code>
+              <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('pm2 stop krakbot')">Copiar</button>
+            </div>
+            <div class="cmd-row">
+              <span class="cmd-label">Prender:</span>
+              <code>pm2 start krakbot</code>
+              <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('pm2 start krakbot')">Copiar</button>
+            </div>
+            <div class="cmd-row">
+              <span class="cmd-label">Logs:</span>
+              <code>pm2 logs krakbot</code>
+              <button class="btn btn-secondary btn-sm" onclick="copyToClipboard('pm2 logs krakbot')">Copiar</button>
+            </div>
+          </div>
+
+          <div id="autostart-sudo-block" hidden style="margin-top:1rem;">
+            <div class="banner-warning">
+              ⚠️ <strong>PM2 necesita permisos de sistema.</strong>
+              Copiá y pegá este comando en tu terminal para completar el autostart:
+            </div>
+            <div class="cmd-row" style="margin-top:0.5rem;">
+              <code id="sudo-cmd-text" style="font-size:0.78rem; word-break:break-all; flex:1;"></code>
+              <button class="btn btn-secondary btn-sm" id="btn-copy-sudo">Copiar</button>
+            </div>
+          </div>
+        </div>
 
         <div class="btn-row" style="margin-top:1.25rem;">
           <a class="btn btn-primary" id="btn-open-bot" href="#" target="_blank" rel="noopener" hidden>

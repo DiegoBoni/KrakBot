@@ -159,6 +159,12 @@ function maskToken(token) {
 
 function writeEnv(config) {
   const ts = new Date().toISOString().slice(0, 16).replace('T', ' ')
+  const audioBlock = config.includeAudio ? `
+WHISPER_MODEL=${config.whisperModel || 'mlx-community/whisper-base-mlx'}
+WHISPER_LANGUAGE=${config.whisperLanguage || 'es'}
+AUDIO_TEMP_DIR=/tmp/krakbot-audio
+MAX_AUDIO_SIZE_MB=25
+` : ''
   return `# Generado por KrakBot Installer — ${ts}
 
 TELEGRAM_TOKEN=${config.token || ''}
@@ -166,7 +172,6 @@ TELEGRAM_TOKEN=${config.token || ''}
 DEFAULT_AGENT=${config.defaultAgent || 'claude'}
 AUTHORIZED_USERS=${config.authorizedUsers || ''}
 
-CLI_TIMEOUT=${config.timeout || 120000}
 DEBUG=${config.debug || false}
 
 CLAUDE_CLI_PATH=claude
@@ -178,7 +183,7 @@ GEMINI_MODEL=${config.geminiModel || 'gemini-2.5-pro'}
 CODEX_MODEL=${config.codexModel || 'gpt-5.2-codex'}
 
 MAX_RESPONSE_LENGTH=4000
-`
+${audioBlock}`
 }
 
 // ─── JSON response helper ─────────────────────────────────────────────────────
@@ -226,6 +231,21 @@ async function getTelegramUsername(token) {
   })
 }
 
+// ─── Sequential SSE helper ────────────────────────────────────────────────────
+function spawnAndStream(res, command, args, cwd, { silent } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { cwd, shell: false })
+    const emit = (d) => {
+      if (silent) return
+      d.toString().split('\n').filter(l => l.trim()).forEach(l => res.write(`data: ${l}\n\n`))
+    }
+    child.stdout.on('data', emit)
+    child.stderr.on('data', emit)
+    child.on('close', resolve)
+    child.on('error', (err) => { res.write(`data: ERROR: ${err.message}\n\n`); resolve(1) })
+  })
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 async function router(req, res, port) {
   const { method, url } = req
@@ -253,7 +273,12 @@ async function router(req, res, port) {
       codex:  checkCLI('codex').found,
     }
 
-    sendJSON(res, { nodeVersion, npmVersion, envExists, hasGit, clisFound })
+    const audioTools = {
+      ffmpeg:     checkCLI('ffmpeg').found,
+      mlxWhisper: checkCLI('mlx_whisper').found,
+    }
+
+    sendJSON(res, { nodeVersion, npmVersion, envExists, hasGit, clisFound, arch: os.arch(), platform: os.platform(), audioTools })
     return
   }
 
@@ -332,41 +357,73 @@ async function router(req, res, port) {
       'Access-Control-Allow-Origin': '*',
     })
 
-    const child = spawn('npm', ['start'], { cwd: PROJECT_ROOT, shell: false })
-    let success = false
-    const timeout = setTimeout(() => {
-      success = true
-      res.write('data: __DONE__\n\n')
-      res.end()
-      // Don't kill — leave bot running
-    }, 15000)
+    const isWindows = os.platform() === 'win32'
+    const whichCmd = isWindows ? 'where' : 'which'
 
-    const sendLine = (line) => {
-      const lines = line.toString().split('\n')
-      for (const l of lines) {
-        if (l.trim()) res.write(`data: ${l}\n\n`)
+    // 1. Check pm2
+    const pm2CheckCode = await spawnAndStream(res, whichCmd, ['pm2'], PROJECT_ROOT, { silent: true })
+    if (pm2CheckCode !== 0) {
+      res.write('data: ⚠️ pm2 no encontrado. Instalando...\n\n')
+      const installCode = await spawnAndStream(res, 'npm', ['install', '-g', 'pm2'], PROJECT_ROOT)
+      if (installCode !== 0) {
+        res.write('data: ❌ Error instalando pm2. Intentá: sudo npm install -g pm2\n\n')
+        res.write('data: __DONE__\n\n')
+        res.end()
+        return
       }
     }
 
-    child.stdout.on('data', sendLine)
-    child.stderr.on('data', sendLine)
+    // 2. Check if krakbot already exists in pm2
+    const describeCode = await spawnAndStream(res, 'pm2', ['describe', 'krakbot'], PROJECT_ROOT, { silent: true })
 
-    child.on('close', (code) => {
-      clearTimeout(timeout)
-      if (!success) {
-        res.write(`data: [Bot terminó con código ${code}]\n\n`)
-        res.write('data: __DONE__\n\n')
-        res.end()
+    // 3. Start or restart
+    if (describeCode === 0) {
+      res.write('data: 🔄 KrakBot ya está en pm2 — reiniciando...\n\n')
+      await spawnAndStream(res, 'pm2', ['restart', 'krakbot', '--update-env'], PROJECT_ROOT)
+    } else {
+      res.write('data: 🚀 Iniciando KrakBot con pm2...\n\n')
+      await spawnAndStream(res, 'pm2', ['start', 'npm', '--name', 'krakbot', '--', 'start'], PROJECT_ROOT)
+    }
+
+    res.write('data: __DONE__\n\n')
+    res.end()
+    return
+  }
+
+  // ── POST /api/setup-autostart ────────────────────────────────────────────────
+  if (method === 'POST' && pathname === '/api/setup-autostart') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    })
+
+    const SUDO_RE = /sudo\s+env\s+PATH|sudo\s+systemctl|sudo\s+launchctl/
+
+    const streamCmd = (command, args) => new Promise((resolve) => {
+      const child = spawn(command, args, { cwd: PROJECT_ROOT, shell: false })
+      const emit = (d) => {
+        d.toString().split('\n').forEach((line) => {
+          if (!line.trim()) return
+          if (SUDO_RE.test(line)) {
+            res.write(`data: SUDO_CMD: ${line}\n\n`)
+          } else {
+            res.write(`data: ${line}\n\n`)
+          }
+        })
       }
+      child.stdout.on('data', emit)
+      child.stderr.on('data', emit)
+      child.on('close', resolve)
+      child.on('error', (err) => { res.write(`data: ERROR: ${err.message}\n\n`); resolve(1) })
     })
 
-    child.on('error', (err) => {
-      clearTimeout(timeout)
-      res.write(`data: ERROR: ${err.message}\n\n`)
-      res.write('data: __DONE__\n\n')
-      res.end()
-    })
+    await streamCmd('pm2', ['save'])
+    await streamCmd('pm2', ['startup'])
 
+    res.write('data: __DONE__\n\n')
+    res.end()
     return
   }
 
@@ -383,6 +440,37 @@ async function router(req, res, port) {
     } catch (err) {
       sendJSON(res, { error: err.message }, 500)
     }
+    return
+  }
+
+  // ── POST /api/install-audio ─────────────────────────────────────────────────
+  if (method === 'POST' && pathname === '/api/install-audio') {
+    const body = await readBody(req)
+    let tool = ''
+    try { tool = JSON.parse(body).tool } catch {}
+    if (!['ffmpeg', 'mlx-whisper'].includes(tool)) {
+      sendJSON(res, { error: 'Invalid tool' }, 400)
+      return
+    }
+    if (tool === 'mlx-whisper' && os.arch() !== 'arm64') {
+      sendJSON(res, { error: 'not-supported' }, 400)
+      return
+    }
+
+    let command, args
+    const platform = os.platform()
+    if (tool === 'ffmpeg') {
+      if (platform === 'darwin')           { command = 'brew';    args = ['install', 'ffmpeg'] }
+      else if (checkCLI('apt-get').found)  { command = 'apt-get'; args = ['install', '-y', 'ffmpeg'] }
+      else if (checkCLI('dnf').found)      { command = 'dnf';     args = ['install', '-y', 'ffmpeg'] }
+      else if (checkCLI('yum').found)      { command = 'yum';     args = ['install', '-y', 'ffmpeg'] }
+      else { sendJSON(res, { error: 'no-package-manager' }, 400); return }
+    } else {
+      command = 'pip3'
+      args = ['install', 'mlx-whisper']
+    }
+
+    streamCommand(req, res, command, args, PROJECT_ROOT)
     return
   }
 

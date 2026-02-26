@@ -23,10 +23,9 @@ function createBot() {
   const token = process.env.TELEGRAM_TOKEN
   if (!token) throw new Error('Falta TELEGRAM_TOKEN en el .env')
 
-  // handlerTimeout must exceed the CLI runner timeout (default 120s) so Telegraf
+  // handlerTimeout must exceed the CLI runner safety ceiling (30 min) so Telegraf
   // doesn't kill the handler promise before the agent has a chance to respond.
-  const cliTimeout = parseInt(process.env.CLI_TIMEOUT) || 120_000
-  const bot = new Telegraf(token, { handlerTimeout: cliTimeout + 30_000 })
+  const bot = new Telegraf(token, { handlerTimeout: 31 * 60 * 1000 })
 
   // ─── Auth ──────────────────────────────────────────────────────────────────
   bot.use(authMiddleware())
@@ -57,11 +56,18 @@ function createBot() {
   bot.command('forget',     handleForget)
 
   // ─── Text messages → task dispatch ────────────────────────────────────────
-  bot.on('text', handleTask)
+  // Fire-and-forget: return immediately so Telegraf's polling loop can fetch
+  // the next update without waiting for the (potentially 30-min) AI handler.
+  bot.on('text', (ctx) => {
+    handleTask(ctx).catch((err) => {
+      logger.error(`Unhandled task error: ${err.message}`)
+      ctx.reply('❌ Error inesperado.').catch(() => {})
+    })
+  })
 
   // ─── Voice / audio messages → transcription + dispatch ────────────────────
-  bot.on('voice', handleVoice)
-  bot.on('audio', handleVoice)
+  bot.on('voice', (ctx) => { handleVoice(ctx).catch((err) => logger.error(`Unhandled voice error: ${err.message}`)) })
+  bot.on('audio', (ctx) => { handleVoice(ctx).catch((err) => logger.error(`Unhandled audio error: ${err.message}`)) })
 
   // ─── Global error handler ─────────────────────────────────────────────────
   bot.catch(async (err, ctx) => {

@@ -698,6 +698,21 @@ details .details-body {
   margin: 1.25rem 0 0.75rem;
 }
 
+/* ─── Command reference rows ─────────────────────────────────────────────────── */
+.cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.cmd-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  min-width: 4.5rem;
+}
+
 /* ─── Responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .agents-grid {
