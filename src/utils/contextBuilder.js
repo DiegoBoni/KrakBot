@@ -1,9 +1,13 @@
 const soulManager = require('./soulManager')
 const memoryManager = require('./memoryManager')
 
-const HISTORY_LIMIT = 6
 const HISTORY_ENTRY_MAX = 500
 const PROMPT_HARD_LIMIT = 12000
+
+function getHistoryWindow() {
+  const n = parseInt(process.env.HISTORY_WINDOW)
+  return isNaN(n) || n < 0 ? 6 : n
+}
 
 function getMemoryLimit() {
   return parseInt(process.env.MEMORY_INJECT_LIMIT) || 2000
@@ -15,7 +19,10 @@ function getMemoryMode() {
 
 function buildHistoryBlock(history) {
   if (!history || history.length === 0) return ''
-  const recent = history.slice(-HISTORY_LIMIT)
+  const win = getHistoryWindow()
+  if (win === 0) return ''
+  const recent = history.slice(-win * 2)
+  if (recent.length === 0) return ''
   const lines = recent.map(({ role, content }) => {
     const label = role === 'user' ? 'Usuario' : 'Asistente'
     return `${label}: ${content.slice(0, HISTORY_ENTRY_MAX)}`

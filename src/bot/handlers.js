@@ -213,6 +213,9 @@ async function handleSession(ctx) {
   const session = sessionManager.getOrCreate(ctx.from.id)
   const agent = getAgentInfo(session.agent)
   const inactiveMins = Math.round((Date.now() - session.lastActivity) / 60_000)
+  const { existsSync } = require('fs')
+  const { resolve } = require('path')
+  const persisted = existsSync(resolve(__dirname, `../../data/sessions/${ctx.from.id}.json`))
 
   await ctx.reply(
     `📋 *Tu sesión*\n\n` +
@@ -220,6 +223,7 @@ async function handleSession(ctx) {
     `${agent?.emoji ?? '🤖'} Agente: *${agent?.name ?? session.agent}*\n` +
     `💬 Mensajes en historial: ${session.history.length}\n` +
     `📊 Tareas totales: ${session.taskCount}\n` +
+    `💾 Historial persistido: ${persisted ? 'sí' : 'no'}\n` +
     `⏱ Última actividad: hace ${inactiveMins} min`,
     { parse_mode: 'Markdown' }
   )
@@ -497,10 +501,9 @@ async function handleTask(ctx) {
     const response = await dispatch(agentKey, prompt, session, signal)
     clearAllTimers()
 
-    if (!agentKey) {
-      sessionManager.addToHistory(userId, 'user', prompt)
-      sessionManager.addToHistory(userId, 'assistant', response)
-    }
+    const effectiveAgent = agentKey || session.agent
+    sessionManager.addToHistory(userId, 'user', prompt, effectiveAgent)
+    sessionManager.addToHistory(userId, 'assistant', response, effectiveAgent)
 
     // Deliver response — prefix only if the transition message was shown (120s mark was reached)
     const bg = sessionManager.getBackgroundTask(userId)

@@ -1,5 +1,7 @@
 require('dotenv').config()
 
+const { mkdirSync } = require('fs')
+const path = require('path')
 const { createBot } = require('./bot/index')
 const sessionManager = require('./utils/sessionManager')
 const logger = require('./utils/logger')
@@ -9,6 +11,15 @@ const { ensureTempDir, checkWhisper } = require('./utils/audioTranscriber')
 
 async function main() {
   logger.info('🚀 Telegram AI Gateway arrancando...')
+
+  // Ensure persistent session storage directory exists (non-fatal).
+  const sessionsDir = path.resolve(__dirname, '../data/sessions')
+  try {
+    mkdirSync(sessionsDir, { recursive: true })
+    logger.debug(`Sessions dir ready: ${sessionsDir}`)
+  } catch (err) {
+    logger.error(`No se pudo crear data/sessions/: ${err.message}`)
+  }
 
   // Validate CLI binaries and API key env vars before accepting requests.
   // Non-fatal: bot still launches even if some CLIs are missing.
