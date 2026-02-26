@@ -299,6 +299,14 @@ async function router(req, res, port) {
 
   // ── POST /api/npm-install ───────────────────────────────────────────────────
   if (method === 'POST' && pathname === '/api/npm-install') {
+    if (!fs.existsSync(path.join(PROJECT_ROOT, 'package.json'))) {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', 'Access-Control-Allow-Origin': '*' })
+      res.write(`data: ❌ package.json no encontrado en ${PROJECT_ROOT}\n\n`)
+      res.write('data: Intentá volver a clonar el repositorio: git clone https://github.com/DiegoBoni/KrakBot ~/.krakbot\n\n')
+      res.write('data: __DONE__\n\n')
+      res.end()
+      return
+    }
     streamCommand(req, res, 'npm', ['install'], PROJECT_ROOT)
     return
   }
@@ -373,17 +381,12 @@ async function router(req, res, port) {
       }
     }
 
-    // 2. Check if krakbot already exists in pm2
-    const describeCode = await spawnAndStream(res, 'pm2', ['describe', 'krakbot'], PROJECT_ROOT, { silent: true })
+    // 2. Delete any existing krakbot instances to avoid duplicates (silent — ok if none exist)
+    await spawnAndStream(res, 'pm2', ['delete', 'krakbot'], PROJECT_ROOT, { silent: true })
 
-    // 3. Start or restart
-    if (describeCode === 0) {
-      res.write('data: 🔄 KrakBot ya está en pm2 — reiniciando...\n\n')
-      await spawnAndStream(res, 'pm2', ['restart', 'krakbot', '--update-env'], PROJECT_ROOT)
-    } else {
-      res.write('data: 🚀 Iniciando KrakBot con pm2...\n\n')
-      await spawnAndStream(res, 'pm2', ['start', 'npm', '--name', 'krakbot', '--', 'start'], PROJECT_ROOT)
-    }
+    // 3. Fresh start (always clean)
+    res.write('data: 🚀 Iniciando KrakBot con pm2...\n\n')
+    await spawnAndStream(res, 'pm2', ['start', 'npm', '--name', 'krakbot', '--', 'start'], PROJECT_ROOT)
 
     res.write('data: __DONE__\n\n')
     res.end()
@@ -467,7 +470,7 @@ async function router(req, res, port) {
       else { sendJSON(res, { error: 'no-package-manager' }, 400); return }
     } else {
       command = 'pip3'
-      args = ['install', 'mlx-whisper']
+      args = ['install', '--break-system-packages', 'mlx-whisper']
     }
 
     streamCommand(req, res, command, args, PROJECT_ROOT)
