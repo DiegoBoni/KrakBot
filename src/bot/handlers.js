@@ -1,4 +1,4 @@
-const { dispatch, resolveAgent, getAgentInfo, listAgents } = require('../agents/router')
+const { dispatch, dispatchStreaming, resolveAgent, getAgentInfo, listAgents } = require('../agents/router')
 const sessionManager = require('../utils/sessionManager')
 const soulManager = require('../utils/soulManager')
 const memoryManager = require('../utils/memoryManager')
@@ -438,6 +438,13 @@ async function handleTask(ctx) {
   let bgPhaseTimer = null
   let lastVibeIdx = -1
 
+  // Streaming state
+  let streamingText = ''
+  let streamingStarted = false
+  let lastStreamEdit = 0
+  let streamEditScheduled = false
+  const STREAM_EDIT_INTERVAL = 1500 // ms between Telegram edits
+
   const clearAllTimers = () => {
     clearTimeout(vibePhaseTimer)
     clearInterval(vibeInterval)
@@ -465,6 +472,8 @@ async function handleTask(ctx) {
     // Phase 2 (60s): Start rotating vibe phrases every 15s
     vibePhaseTimer = setTimeout(() => {
       const showVibe = async () => {
+        // Don't overwrite streaming content already shown in statusMsg
+        if (streamingStarted) return
         const phrase = randomVibe(lastVibeIdx)
         lastVibeIdx = VIBE_PHRASES.indexOf(phrase)
         if (statusMsg) {
@@ -498,7 +507,32 @@ async function handleTask(ctx) {
       }, 60_000) // 60s after phase 2 = 120s total
     }, 60_000)
 
-    const response = await dispatch(agentKey, prompt, session, signal)
+    // Streaming callback: throttle edits to avoid Telegram rate limits
+    const scheduleStreamEdit = () => {
+      if (streamEditScheduled) return
+      const delay = Math.max(0, STREAM_EDIT_INTERVAL - (Date.now() - lastStreamEdit))
+      streamEditScheduled = true
+      setTimeout(async () => {
+        streamEditScheduled = false
+        lastStreamEdit = Date.now()
+        if (statusMsg) {
+          const preview = streamingText.length > 3800
+            ? '...' + streamingText.slice(-3800)
+            : streamingText
+          await ctx.telegram.editMessageText(
+            ctx.chat.id, statusMsg.message_id, undefined, preview
+          ).catch(() => {})
+        }
+      }, delay)
+    }
+
+    const onStreamChunk = (chunk) => {
+      streamingText += chunk
+      if (!streamingStarted) streamingStarted = true
+      scheduleStreamEdit()
+    }
+
+    const response = await dispatchStreaming(agentKey, prompt, session, signal, onStreamChunk)
     clearAllTimers()
 
     const effectiveAgent = agentKey || session.agent
@@ -516,8 +550,29 @@ async function handleTask(ctx) {
       await ctx.telegram.deleteMessage(ctx.chat.id, bg.transitionMsgId).catch(() => {})
     } else {
       const chunks = splitMessage(response, MAX_RESPONSE_LENGTH)
-      for (const chunk of chunks) {
-        await sendWithFallback(ctx, chunk)
+
+      // Null statusMsg BEFORE the first await so any pending stream edit timer
+      // sees null and won't overwrite our final edit.
+      const finalMsgId = statusMsg?.message_id
+      statusMsg = null
+
+      if (finalMsgId) {
+        // Edit in-place with final response — try Markdown first, fall back to plain
+        await ctx.telegram.editMessageText(
+          ctx.chat.id, finalMsgId, undefined,
+          chunks[0], { parse_mode: 'Markdown' }
+        ).catch(async () => {
+          await ctx.telegram.editMessageText(
+            ctx.chat.id, finalMsgId, undefined, chunks[0]
+          ).catch(() => {})
+        })
+      } else {
+        await sendWithFallback(ctx, chunks[0])
+      }
+
+      // Send any additional chunks as new messages
+      for (let i = 1; i < chunks.length; i++) {
+        await sendWithFallback(ctx, chunks[i])
       }
     }
     sessionManager.clearBackgroundTask(userId)
@@ -694,7 +749,7 @@ function splitMessage(text, maxLength) {
 
 async function sendWithFallback(ctx, text) {
   try {
-    await ctx.reply(`\`\`\`\n${text}\n\`\`\``, { parse_mode: 'Markdown' })
+    await ctx.reply(text, { parse_mode: 'Markdown' })
   } catch {
     await ctx.reply(text)
   }
