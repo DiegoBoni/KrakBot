@@ -8,6 +8,7 @@ const logger = require('./utils/logger')
 const { validateAll } = require('./utils/cliValidator')
 const { AGENTS } = require('./agents/router')
 const { ensureTempDir, checkWhisper } = require('./utils/audioTranscriber')
+const updateChecker = require('./utils/updateChecker')
 
 async function main() {
   logger.info('🚀 Telegram AI Gateway arrancando...')
@@ -35,6 +36,9 @@ async function main() {
   }
 
   const bot = createBot()
+
+  // Init auto-updater with bot instance (must happen before bot.launch)
+  updateChecker.init(bot)
 
   // Periodic cleanup of stale sessions (every hour)
   const cleanupInterval = setInterval(() => {
@@ -68,9 +72,16 @@ async function main() {
     { command: 'limpiar', description: 'Borrar historial de la sesión' },
     { command: 'ayuda',   description: 'Instrucciones de uso' },
     { command: 'ping',    description: 'Health check de los agentes' },
+    { command: 'update',  description: 'Chequear actualizaciones disponibles' },
   ])
 
   logger.info(`✅ Bot corriendo: @${bot.botInfo?.username ?? 'unknown'}`)
+
+  // Check for success message from a previous auto-update restart
+  await updateChecker.checkPendingUpdate()
+
+  // Schedule periodic update checks (first check after 30s, then every N hours)
+  updateChecker.start()
 }
 
 main().catch((err) => {

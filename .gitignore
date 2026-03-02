@@ -21,6 +21,8 @@ tasks.md
 # Bot personalization data (local only — contains user identity and memories)
 data/SOUL.md
 data/memories/
+data/sessions/
+data/.update-pending.json
 
 # macOS metadata
 .DS_Store

@@ -1,5 +1,6 @@
 const { Telegraf } = require('telegraf')
 const { authMiddleware } = require('./middleware')
+const updateChecker = require('../utils/updateChecker')
 const {
   handleStart,
   handleHelp,
@@ -54,6 +55,14 @@ function createBot() {
   bot.command('remember',   handleRemember)
   bot.command('memories',   handleMemories)
   bot.command('forget',     handleForget)
+
+  // Auto-update command
+  bot.command('update', (ctx) => updateChecker.handleUpdate(ctx))
+
+  // Inline keyboard callbacks for update notification
+  bot.action('update_yes',    async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await updateChecker.handleUpdateYes(ctx) })
+  bot.action('update_remind', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await updateChecker.handleUpdateRemind(ctx) })
+  bot.action('update_ignore', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await updateChecker.handleUpdateIgnore(ctx) })
 
   // ─── Text messages → task dispatch ────────────────────────────────────────
   // Fire-and-forget: return immediately so Telegraf's polling loop can fetch
