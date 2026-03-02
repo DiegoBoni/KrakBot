@@ -61,17 +61,18 @@ async function main() {
   process.once('SIGINT',  () => shutdown('SIGINT'))
   process.once('SIGTERM', () => shutdown('SIGTERM'))
 
-  // Retry on 409 Conflict: previous polling session may still be alive for a few seconds
-  const LAUNCH_RETRIES = 6
-  const LAUNCH_RETRY_DELAY_MS = 5000
+  // Retry on 409 Conflict: Telegram holds the previous long-polling session open for ~30s
+  // after the process dies. First wait is 35s to outlast that window; subsequent waits shorter.
+  const LAUNCH_RETRIES = 4
   for (let attempt = 1; attempt <= LAUNCH_RETRIES; attempt++) {
     try {
       await bot.launch({ dropPendingUpdates: true })
       break
     } catch (err) {
       if (err.message && err.message.includes('409') && attempt < LAUNCH_RETRIES) {
-        logger.warn(`bot.launch() 409 Conflict — reintentando en ${LAUNCH_RETRY_DELAY_MS / 1000}s (intento ${attempt}/${LAUNCH_RETRIES})`)
-        await new Promise(resolve => setTimeout(resolve, LAUNCH_RETRY_DELAY_MS))
+        const delay = attempt === 1 ? 35000 : 10000
+        logger.warn(`bot.launch() 409 Conflict — reintentando en ${delay / 1000}s (intento ${attempt}/${LAUNCH_RETRIES})`)
+        await new Promise(resolve => setTimeout(resolve, delay))
       } else {
         throw err
       }

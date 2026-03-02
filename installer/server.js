@@ -408,8 +408,9 @@ async function router(req, res, port) {
     await spawnAndStream(res, 'pm2', ['delete', 'krakbot'], PROJECT_ROOT, { silent: true })
 
     // 3. Fresh start (always clean)
+    // --restart-delay 40000: wait 40s before restart so Telegram releases the previous polling session
     res.write('data: 🚀 Iniciando KrakBot con pm2...\n\n')
-    await spawnAndStream(res, 'pm2', ['start', 'npm', '--name', 'krakbot', '--', 'start'], PROJECT_ROOT)
+    await spawnAndStream(res, 'pm2', ['start', 'npm', '--name', 'krakbot', '--restart-delay', '40000', '--', 'start'], PROJECT_ROOT)
 
     res.write('data: __DONE__\n\n')
     res.end()
