@@ -160,6 +160,7 @@ function maskToken(token) {
 function writeEnv(config) {
   const ts = new Date().toISOString().slice(0, 16).replace('T', ' ')
   const audioBlock = config.includeAudio ? `
+# Audio transcription (mlx-whisper)
 WHISPER_MODEL=${config.whisperModel || 'mlx-community/whisper-base-mlx'}
 WHISPER_LANGUAGE=${config.whisperLanguage || 'es'}
 AUDIO_TEMP_DIR=/tmp/krakbot-audio
@@ -174,16 +175,38 @@ AUTHORIZED_USERS=${config.authorizedUsers || ''}
 
 DEBUG=${config.debug || false}
 
+CLI_TIMEOUT=120000
+
 CLAUDE_CLI_PATH=claude
 GEMINI_CLI_PATH=gemini
 CODEX_CLI_PATH=codex
 
 CLAUDE_MODEL=${config.claudeModel || 'claude-sonnet-4-6'}
 GEMINI_MODEL=${config.geminiModel || 'gemini-2.5-pro'}
-CODEX_MODEL=${config.codexModel || 'gpt-5.2-codex'}
+CODEX_MODEL=${config.codexModel || ''}
 
 MAX_RESPONSE_LENGTH=4000
-${audioBlock}`
+
+# Personalization — soul & memories
+SOUL_PATH=./data/SOUL.md
+MEMORY_INJECT=recent
+MEMORY_INJECT_LIMIT=2000
+
+# Conversational memory
+HISTORY_WINDOW=6
+SESSION_TTL_HOURS=0
+${audioBlock}
+# Auto-update desde GitHub
+GITHUB_REPO=DiegoBoni/KrakBot
+GITHUB_BRANCH=main
+UPDATE_CHECK_INTERVAL_HOURS=24
+NOTIFY_CHAT_ID=
+GITHUB_TOKEN=
+PM2_APP_NAME=krakbot
+
+# Custom Agents
+ROOT_AGENT_CLI=claude
+`
 }
 
 // ─── JSON response helper ─────────────────────────────────────────────────────
