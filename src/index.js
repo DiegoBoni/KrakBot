@@ -61,9 +61,22 @@ async function main() {
   process.once('SIGINT',  () => shutdown('SIGINT'))
   process.once('SIGTERM', () => shutdown('SIGTERM'))
 
-  await bot.launch({
-    dropPendingUpdates: true,
-  })
+  // Retry on 409 Conflict: previous polling session may still be alive for a few seconds
+  const LAUNCH_RETRIES = 6
+  const LAUNCH_RETRY_DELAY_MS = 5000
+  for (let attempt = 1; attempt <= LAUNCH_RETRIES; attempt++) {
+    try {
+      await bot.launch({ dropPendingUpdates: true })
+      break
+    } catch (err) {
+      if (err.message && err.message.includes('409') && attempt < LAUNCH_RETRIES) {
+        logger.warn(`bot.launch() 409 Conflict — reintentando en ${LAUNCH_RETRY_DELAY_MS / 1000}s (intento ${attempt}/${LAUNCH_RETRIES})`)
+        await new Promise(resolve => setTimeout(resolve, LAUNCH_RETRY_DELAY_MS))
+      } else {
+        throw err
+      }
+    }
+  }
 
   // Register the "/" command menu visible in Telegram clients
   await bot.telegram.setMyCommands([
