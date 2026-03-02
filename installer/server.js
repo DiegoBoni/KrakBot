@@ -412,6 +412,9 @@ async function router(req, res, port) {
     res.write('data: 🚀 Iniciando KrakBot con pm2...\n\n')
     await spawnAndStream(res, 'pm2', ['start', 'npm', '--name', 'krakbot', '--restart-delay', '40000', '--', 'start'], PROJECT_ROOT)
 
+    res.write('data: 💾 Guardando estado de pm2...\n\n')
+    await spawnAndStream(res, 'pm2', ['save'], PROJECT_ROOT, { silent: true })
+
     res.write('data: __DONE__\n\n')
     res.end()
     return
