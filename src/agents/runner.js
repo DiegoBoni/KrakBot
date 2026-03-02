@@ -136,4 +136,103 @@ function buildShortError(stderr, code) {
   return `El CLI terminó con código ${code}.`
 }
 
-module.exports = { runCLI }
+/**
+ * Like runCLI but calls onChunk(text) with each stdout chunk in real time.
+ * Returns a Promise<string> with the full accumulated stdout when the process ends.
+ *
+ * @param {string[]}     command  [executable, ...args]
+ * @param {string}       input    Text to write to stdin
+ * @param {AbortSignal}  signal   Optional signal to cancel the process
+ * @param {Function}     onChunk  Called with each stdout chunk (string)
+ * @returns {Promise<string>} full stdout of the process
+ */
+function runCLIStreaming(command, input, signal, onChunk) {
+  const [bin, ...args] = command
+
+  return new Promise((resolve, reject) => {
+    logger.debug(`Spawning (streaming): ${bin} ${args.join(' ')} (safety timeout: ${SAFETY_TIMEOUT / 1000}s)`)
+
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+
+    const childEnv = { ...process.env, TERM: 'xterm-256color' }
+    delete childEnv.CLAUDECODE
+
+    const child = spawn(bin, args, {
+      env: childEnv,
+      shell: false,
+      cwd: process.env.HOME || require('os').tmpdir(),
+    })
+
+    const killChild = () => {
+      child.kill('SIGTERM')
+      setTimeout(() => child.kill('SIGKILL'), 2000)
+    }
+
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      killChild()
+      reject(Object.assign(new Error('Timeout: el agente tardó más de 30 minutos.'), { timedOut: true }))
+    }, SAFETY_TIMEOUT)
+
+    if (signal) {
+      if (signal.aborted) {
+        clearTimeout(timer)
+        killChild()
+        return reject(Object.assign(new Error('cancelled'), { cancelled: true }))
+      }
+      const onAbort = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        killChild()
+        reject(Object.assign(new Error('cancelled'), { cancelled: true }))
+      }
+      signal.addEventListener('abort', onAbort, { once: true })
+      child.once('close', () => signal.removeEventListener('abort', onAbort))
+    }
+
+    child.stdout.on('data', (chunk) => {
+      const text = chunk.toString()
+      stdout += text
+      try { onChunk(text) } catch {}
+    })
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString()
+      logger.debug(`[stderr] ${chunk.toString().slice(0, 120).trimEnd()}`)
+    })
+
+    if (input) {
+      child.stdin.write(input)
+    }
+    child.stdin.end()
+
+    child.on('error', (err) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      const msg = err.code === 'ENOENT'
+        ? `El CLI "${bin}" no está instalado o no está en PATH. Pedile al operador que configure ${bin.toUpperCase()}_CLI_PATH.`
+        : `No se pudo iniciar el CLI "${bin}": ${err.message}`
+      reject(Object.assign(new Error(msg), { cause: err, isEnoent: err.code === 'ENOENT' }))
+    })
+
+    child.on('close', (code) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+
+      if (code === 0 || stdout.trim()) {
+        resolve(stdout || '(sin respuesta)')
+        return
+      }
+
+      const shortError = buildShortError(stderr, code)
+      reject(Object.assign(new Error(shortError), { exitCode: code, stderr }))
+    })
+  })
+}
+
+module.exports = { runCLI, runCLIStreaming }

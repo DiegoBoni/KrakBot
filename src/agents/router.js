@@ -109,4 +109,33 @@ async function dispatch(agentKey, prompt, session, signal) {
   return agentModule.run(prompt, session, signal)
 }
 
-module.exports = { AGENTS, dispatch, resolveAgent, getAgentInfo, listAgents }
+/**
+ * Like dispatch but streams stdout chunks via onChunk(text) in real time.
+ * Falls back to regular dispatch if the agent doesn't implement runStreaming.
+ *
+ * @param {string}    agentKey  Canonical agent key (or null to use session.agent)
+ * @param {string}    prompt    The user's task
+ * @param {object}    session   Session object from sessionManager
+ * @param {AbortSignal} signal  Optional cancellation signal
+ * @param {Function}  onChunk   Called with each stdout text chunk
+ * @returns {Promise<string>}   Full stdout when done
+ */
+async function dispatchStreaming(agentKey, prompt, session, signal, onChunk) {
+  const key = agentKey || session.agent
+  const agent = getAgentInfo(key)
+
+  if (!agent) {
+    throw new Error(`Agente desconocido: "${key}"`)
+  }
+
+  logger.info(`Streaming dispatch to ${agent.name} | user=${session.userId} | prompt="${prompt.slice(0, 60)}..."`)
+
+  const agentModule = require(`./${key}`)
+  if (typeof agentModule.runStreaming === 'function') {
+    return agentModule.runStreaming(prompt, session, signal, onChunk)
+  }
+  // Fallback: run without streaming
+  return agentModule.run(prompt, session, signal)
+}
+
+module.exports = { AGENTS, dispatch, dispatchStreaming, resolveAgent, getAgentInfo, listAgents }
