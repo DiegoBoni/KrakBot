@@ -30,7 +30,7 @@ function buildHistoryBlock(history) {
   return `[HISTORIAL]\n${lines.join('\n')}\n[/HISTORIAL]`
 }
 
-async function build(prompt, session) {
+async function build(prompt, session, options = {}) {
   const soul = soulManager.get()
   const memoryMode = getMemoryMode()
 
@@ -39,11 +39,14 @@ async function build(prompt, session) {
     memoriesText = await memoryManager.getRecent(5, getMemoryLimit())
   }
 
-  const historyBlock = buildHistoryBlock(session.history)
-  const soulBlock = soul ? `[SOUL]\n${soul}\n[/SOUL]` : ''
+  const historyBlock  = buildHistoryBlock(session.history)
+  const soulBlock     = soul ? `[SOUL]\n${soul}\n[/SOUL]` : ''
+  const agentBlock    = options.inlineSystemPrompt
+    ? `[INSTRUCCIONES DEL AGENTE]\n${options.inlineSystemPrompt}\n[/INSTRUCCIONES DEL AGENTE]`
+    : ''
   const memoriesBlock = memoriesText ? `[MEMORIES]\n${memoriesText}\n[/MEMORIES]` : ''
 
-  const blocks = [soulBlock, memoriesBlock, historyBlock].filter(Boolean)
+  const blocks = [soulBlock, agentBlock, memoriesBlock, historyBlock].filter(Boolean)
   const suffix = `---\nTarea: ${prompt}`
 
   let full = blocks.length > 0
@@ -52,7 +55,7 @@ async function build(prompt, session) {
 
   // If over the hard limit, drop memories first, then trim soul
   if (full.length > PROMPT_HARD_LIMIT) {
-    const blocksNoMemory = [soulBlock, historyBlock].filter(Boolean)
+    const blocksNoMemory = [soulBlock, agentBlock, historyBlock].filter(Boolean)
     full = blocksNoMemory.length > 0
       ? `${blocksNoMemory.join('\n\n')}\n\n${suffix}`
       : prompt
@@ -60,7 +63,7 @@ async function build(prompt, session) {
     if (full.length > PROMPT_HARD_LIMIT) {
       const trimmedSoul = soul ? soul.slice(0, 1000) : ''
       const trimmedSoulBlock = trimmedSoul ? `[SOUL]\n${trimmedSoul}\n[/SOUL]` : ''
-      const blocksMinimal = [trimmedSoulBlock, historyBlock].filter(Boolean)
+      const blocksMinimal = [trimmedSoulBlock, agentBlock, historyBlock].filter(Boolean)
       full = blocksMinimal.length > 0
         ? `${blocksMinimal.join('\n\n')}\n\n${suffix}`
         : prompt

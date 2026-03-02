@@ -1,11 +1,13 @@
 const { Telegraf } = require('telegraf')
 const { authMiddleware } = require('./middleware')
 const updateChecker = require('../utils/updateChecker')
+const sessionManager = require('../utils/sessionManager')
 const {
   handleStart,
   handleHelp,
   handleListAgents,
   handleSetAgent,
+  handleSetAgentCmd,
   handleSession,
   handleClearHistory,
   handleTask,
@@ -17,6 +19,20 @@ const {
   handleRemember,
   handleMemories,
   handleForget,
+  // Custom agents
+  handleNewAgent,
+  handleDelAgent,
+  handleEditAgent,
+  handleAuto,
+  handleAutoMode,
+  handleDefault,
+  // Inline callbacks
+  handleNewAgentCliSelect,
+  handleDelAgentConfirm,
+  handleDelAgentCancel,
+  handleEditAgentFieldSelect,
+  handleEditAgentCliValSelect,
+  handleEditAgentCancel,
 } = require('./handlers')
 const logger = require('../utils/logger')
 
@@ -31,6 +47,25 @@ function createBot() {
   // ─── Auth ──────────────────────────────────────────────────────────────────
   bot.use(authMiddleware())
 
+  // ─── Middleware: cancel active flows when user sends a command ─────────────
+  bot.use((ctx, next) => {
+    if (ctx.message?.text?.startsWith('/')) {
+      const userId = ctx.from?.id
+      if (userId) {
+        const session = sessionManager.getOrCreate(userId)
+        if (session.newAgentFlow) {
+          session.newAgentFlow = null
+          logger.debug(`newAgentFlow cancelled for user ${userId} (command received)`)
+        }
+        if (session.editAgentFlow) {
+          session.editAgentFlow = null
+          logger.debug(`editAgentFlow cancelled for user ${userId} (command received)`)
+        }
+      }
+    }
+    return next()
+  })
+
   // ─── Commands ──────────────────────────────────────────────────────────────
   bot.command('start', handleStart)
   bot.command(['help', 'ayuda'], handleHelp)
@@ -42,6 +77,7 @@ function createBot() {
   bot.command('claude', (ctx) => handleSetAgent(ctx, 'claude'))
   bot.command('gemini', (ctx) => handleSetAgent(ctx, 'gemini'))
   bot.command('codex',  (ctx) => handleSetAgent(ctx, 'codex'))
+  bot.command('setagent', handleSetAgentCmd)
   bot.command('ping',   (ctx) => {
     const parts = ctx.message.text.split(/\s+/)
     const agentArg = parts[1] ?? null
@@ -59,10 +95,59 @@ function createBot() {
   // Auto-update command
   bot.command('update', (ctx) => updateChecker.handleUpdate(ctx))
 
-  // Inline keyboard callbacks for update notification
+  // Back to default agent
+  bot.command('default', handleDefault)
+
+  // Custom agents commands
+  bot.command('newagent',  handleNewAgent)
+  bot.command('delagent',  handleDelAgent)
+  bot.command('editagent', handleEditAgent)
+  bot.command('auto',      handleAuto)
+  bot.command('automode',  handleAutoMode)
+
+  // ─── Inline keyboard actions ───────────────────────────────────────────────
+
+  // Update notification
   bot.action('update_yes',    async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await updateChecker.handleUpdateYes(ctx) })
   bot.action('update_remind', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await updateChecker.handleUpdateRemind(ctx) })
   bot.action('update_ignore', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await updateChecker.handleUpdateIgnore(ctx) })
+
+  // newagent: CLI selection
+  bot.action(/^newagent_cli:(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {})
+    await handleNewAgentCliSelect(ctx, ctx.match[1])
+  })
+
+  // delagent: confirmation
+  bot.action(/^delagent_yes:(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {})
+    await handleDelAgentConfirm(ctx, ctx.match[1])
+  })
+  bot.action('delagent_no', async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {})
+    await handleDelAgentCancel(ctx)
+  })
+
+  // editagent: field selection
+  bot.action(/^editagent_(desc|prompt|cli):(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {})
+    const fieldMap = { desc: 'description', prompt: 'systemPrompt', cli: 'cli' }
+    await handleEditAgentFieldSelect(ctx, fieldMap[ctx.match[1]], ctx.match[2])
+  })
+  bot.action(/^editagent_cli_val:(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {})
+    await handleEditAgentCliValSelect(ctx, ctx.match[1])
+  })
+  bot.action('editagent_cancel', async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {})
+    await handleEditAgentCancel(ctx)
+  })
+
+  // setagent inline button (from /agentes list)
+  bot.action(/^setagent:(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {})
+    await handleSetAgent(ctx, `custom:${ctx.match[1]}`)
+  })
 
   // ─── Text messages → task dispatch ────────────────────────────────────────
   // Fire-and-forget: return immediately so Telegraf's polling loop can fetch

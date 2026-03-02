@@ -45,8 +45,11 @@ class SessionManager {
         history: data.history,
         lastActivity: Date.now(),
         taskCount: data.taskCount ?? 0,
+        autoMode: data.autoMode ?? false,
         onboarding: null,
         backgroundTask: null,
+        newAgentFlow: null,
+        editAgentFlow: null,
       }
     } catch (err) {
       if (err.code !== 'ENOENT') {
@@ -64,6 +67,7 @@ class SessionManager {
       agent: session.agent,
       history: session.history,
       taskCount: session.taskCount,
+      autoMode: session.autoMode ?? false,
       savedAt: new Date().toISOString(),
     }, null, 2)
     try {
@@ -94,8 +98,11 @@ class SessionManager {
         history: [],
         lastActivity: Date.now(),
         taskCount: 0,
+        autoMode: false,
         onboarding: null,
         backgroundTask: null,
+        newAgentFlow: null,
+        editAgentFlow: null,
       }
       this._sessions.set(key, session)
       logger.debug(`Session created for user ${userId} (agent: ${session.agent})`)
@@ -246,6 +253,26 @@ class SessionManager {
     const session = this.getOrCreate(userId)
     session.backgroundTask = null
     logger.debug(`Background task cleared for user ${userId}`)
+  }
+
+  /**
+   * Sets the autoMode flag for a user and persists it to disk.
+   * @param {number|string} userId
+   * @param {boolean} enabled
+   */
+  setAutoMode(userId, enabled) {
+    const session = this.getOrCreate(userId)
+    session.autoMode = !!enabled
+    this._saveToDisk(session)
+  }
+
+  /**
+   * Returns the autoMode flag for a user.
+   * @param {number|string} userId
+   * @returns {boolean}
+   */
+  getAutoMode(userId) {
+    return this.getOrCreate(userId).autoMode ?? false
   }
 
   /**

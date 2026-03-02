@@ -9,6 +9,7 @@ const { validateAll } = require('./utils/cliValidator')
 const { AGENTS } = require('./agents/router')
 const { ensureTempDir, checkWhisper } = require('./utils/audioTranscriber')
 const updateChecker = require('./utils/updateChecker')
+const customAgentManager = require('./utils/customAgentManager')
 
 async function main() {
   logger.info('🚀 Telegram AI Gateway arrancando...')
@@ -21,6 +22,9 @@ async function main() {
   } catch (err) {
     logger.error(`No se pudo crear data/sessions/: ${err.message}`)
   }
+
+  // Initialize custom agent store (creates data/custom-agents.json if needed)
+  customAgentManager.init()
 
   // Validate CLI binaries and API key env vars before accepting requests.
   // Non-fatal: bot still launches even if some CLIs are missing.
@@ -63,16 +67,23 @@ async function main() {
 
   // Register the "/" command menu visible in Telegram clients
   await bot.telegram.setMyCommands([
-    { command: 'start',   description: 'Bienvenida e instrucciones' },
-    { command: 'agentes', description: 'Ver agentes disponibles' },
-    { command: 'claude',  description: 'Cambiar agente a Claude' },
-    { command: 'gemini',  description: 'Cambiar agente a Gemini' },
-    { command: 'codex',   description: 'Cambiar agente a Codex' },
-    { command: 'sesion',  description: 'Info de la sesión actual' },
-    { command: 'limpiar', description: 'Borrar historial de la sesión' },
-    { command: 'ayuda',   description: 'Instrucciones de uso' },
-    { command: 'ping',    description: 'Health check de los agentes' },
-    { command: 'update',  description: 'Chequear actualizaciones disponibles' },
+    { command: 'start',     description: 'Bienvenida e instrucciones' },
+    { command: 'agentes',   description: 'Ver agentes disponibles' },
+    { command: 'claude',    description: 'Cambiar agente a Claude' },
+    { command: 'gemini',    description: 'Cambiar agente a Gemini' },
+    { command: 'codex',     description: 'Cambiar agente a Codex' },
+    { command: 'newagent',  description: 'Crear un agente personalizado' },
+    { command: 'delagent',  description: 'Borrar un custom agent' },
+    { command: 'editagent', description: 'Editar un custom agent' },
+    { command: 'setagent',  description: 'Activar un custom agent' },
+    { command: 'default',   description: 'Volver al agente por defecto' },
+    { command: 'auto',      description: 'Root Agent: elige el mejor agente' },
+    { command: 'automode',  description: 'Activar/desactivar routing automático' },
+    { command: 'sesion',    description: 'Info de la sesión actual' },
+    { command: 'limpiar',   description: 'Borrar historial de la sesión' },
+    { command: 'ayuda',     description: 'Instrucciones de uso' },
+    { command: 'ping',      description: 'Health check de los agentes' },
+    { command: 'update',    description: 'Chequear actualizaciones disponibles' },
   ])
 
   logger.info(`✅ Bot corriendo: @${bot.botInfo?.username ?? 'unknown'}`)
