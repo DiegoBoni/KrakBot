@@ -4,6 +4,7 @@ const soulManager = require('../utils/soulManager')
 const memoryManager = require('../utils/memoryManager')
 const customAgentManager = require('../utils/customAgentManager')
 const fileManager = require('../utils/fileManager')
+const ttsService = require('../utils/ttsService')
 const logger = require('../utils/logger')
 const { transcribe, checkWhisper } = require('../utils/audioTranscriber')
 
@@ -282,6 +283,8 @@ async function handleSession(ctx) {
     `ID: \`${session.id.slice(0, 8)}...\`\n` +
     `${agent?.emoji ?? '🤖'} Agente: *${agent?.name ?? session.agent}*\n` +
     `🧠 autoMode: *${session.autoMode ? 'ON' : 'OFF'}*\n` +
+    `🎙️ Modo voz: *${session.voiceMode ? 'ON' : 'OFF'}*\n` +
+    `🔊 Botón audio: *${session.ttsButton ? 'ON' : 'OFF'}*\n` +
     `💬 Mensajes en historial: ${session.history.length}\n` +
     `📊 Tareas totales: ${session.taskCount}\n` +
     `💾 Historial persistido: ${persisted ? 'sí' : 'no'}\n` +
@@ -661,6 +664,96 @@ async function handleEditAgentCancel(ctx) {
   await ctx.editMessageText('Cancelado.', { reply_markup: { inline_keyboard: [] } }).catch(() => {})
 }
 
+// ─── TTS helpers & handlers ────────────────────────────────────────────────────
+
+/**
+ * Generates TTS audio from text and sends it as a Telegram voice note.
+ * Deletes the temp file after sending (or on error).
+ * @param {object} ctx  Telegraf context
+ * @param {string} text  Raw text (will be sanitized inside ttsService)
+ */
+async function sendTtsAudio(ctx, text) {
+  const audioPath = await ttsService.generateAudio(text)
+  try {
+    await ctx.replyWithVoice({ source: audioPath })
+  } finally {
+    await ttsService.deleteAudio(audioPath)
+  }
+}
+
+async function handleVoiceMode(ctx) {
+  const userId = ctx.from.id
+  const session = sessionManager.getOrCreate(userId)
+  const current = session.voiceMode ?? false
+  const next = !current
+  sessionManager.setVoiceMode(userId, next)
+  // If activating voiceMode, disable ttsButton to avoid conflict
+  if (next && session.ttsButton) {
+    sessionManager.setTtsButton(userId, false)
+  }
+  await ctx.reply(
+    next
+      ? '🎙️ *Modo voz ON* — Las respuestas llegarán solo como audio. Usá /voicemode para desactivar.'
+      : '💬 *Modo voz OFF* — Volvés a respuestas de texto.',
+    { parse_mode: 'Markdown' }
+  )
+}
+
+async function handleTtsButton(ctx) {
+  const userId = ctx.from.id
+  const session = sessionManager.getOrCreate(userId)
+  const current = session.ttsButton ?? false
+  const next = !current
+  sessionManager.setTtsButton(userId, next)
+  // If activating ttsButton, disable voiceMode to avoid conflict
+  if (next && session.voiceMode) {
+    sessionManager.setVoiceMode(userId, false)
+  }
+  await ctx.reply(
+    next
+      ? '🔊 *Botón de audio activado* — Aparecerá un botón 🔊 bajo cada respuesta. Usá /ttsbutton para desactivarlo.'
+      : '🔇 *Botón de audio desactivado* — Las respuestas volverán a ser solo texto.',
+    { parse_mode: 'Markdown' }
+  )
+}
+
+async function handleVoz(ctx) {
+  const userId = ctx.from.id
+  const arg = ctx.message.text.replace(/^\/voz\s*/i, '').trim()
+  const textToConvert = arg || sessionManager.getLastResponse(userId)
+
+  if (!textToConvert) {
+    await ctx.reply('No hay respuesta reciente para convertir. Enviá un mensaje primero, o usá `/voz <texto>` para convertir un texto directo.', { parse_mode: 'Markdown' })
+    return
+  }
+
+  const statusMsg = await ctx.reply('🎙️ Generando audio...').catch(() => null)
+  try {
+    await sendTtsAudio(ctx, textToConvert)
+  } catch (err) {
+    logger.error(`TTS /voz failed for user ${userId}: ${err.message}`)
+    await ctx.reply(`❌ No pude generar el audio: ${err.message.split('\n')[0].slice(0, 150)}`)
+  } finally {
+    if (statusMsg) await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {})
+  }
+}
+
+async function handleTtsCallback(ctx) {
+  const userId = ctx.from.id
+  const lastResponse = sessionManager.getLastResponse(userId)
+  if (!lastResponse) {
+    await ctx.answerCbQuery('No hay respuesta para convertir', { show_alert: true }).catch(() => {})
+    return
+  }
+  await ctx.answerCbQuery('Generando audio...').catch(() => {})
+  try {
+    await sendTtsAudio(ctx, lastResponse)
+  } catch (err) {
+    logger.error(`TTS callback failed for user ${userId}: ${err.message}`)
+    await ctx.reply(`❌ No pude generar el audio: ${err.message.split('\n')[0].slice(0, 150)}`)
+  }
+}
+
 // ─── Main task handler ─────────────────────────────────────────────────────────
 
 async function handleTask(ctx, forcedText) {
@@ -877,9 +970,11 @@ async function handleTask(ctx, forcedText) {
 
   try {
     const activeAgent = getAgentInfo(agentKey || session.agent)
-    const statusText = derivedAgentName
-      ? `🧠 → *${derivedAgentName}* · Procesando...`
-      : `${activeAgent.emoji} Procesando con *${activeAgent.name}*...`
+    const statusText = session.voiceMode
+      ? '🎙️ Generando respuesta...'
+      : derivedAgentName
+        ? `🧠 → *${derivedAgentName}* · Procesando...`
+        : `${activeAgent.emoji} Procesando con *${activeAgent.name}*...`
 
     statusMsg = await ctx.reply(statusText, { parse_mode: 'Markdown' }).catch(() => null)
 
@@ -952,7 +1047,8 @@ async function handleTask(ctx, forcedText) {
     const onStreamChunk = (chunk) => {
       streamingText += chunk
       if (!streamingStarted) streamingStarted = true
-      scheduleStreamEdit()
+      // In voiceMode, don't stream text to Telegram — wait for full response
+      if (!session.voiceMode) scheduleStreamEdit()
     }
 
     const response = await dispatchStreaming(agentKey, prompt, session, signal, onStreamChunk, fileOpts)
@@ -975,7 +1071,27 @@ async function handleTask(ctx, forcedText) {
       ? `${activeAgent.emoji} *${activeAgent.name}*:\n`
       : ''
 
-    // Deliver response
+    // Save last response for TTS callbacks (always, regardless of mode)
+    sessionManager.setLastResponse(userId, response)
+
+    // ── voiceMode: send audio only, no text ──────────────────────────────────
+    if (session.voiceMode) {
+      const finalMsgId = statusMsg?.message_id
+      statusMsg = null
+      if (finalMsgId) await ctx.telegram.deleteMessage(ctx.chat.id, finalMsgId).catch(() => {})
+      sessionManager.clearBackgroundTask(userId)
+      try {
+        await sendTtsAudio(ctx, response)
+      } catch (ttsErr) {
+        logger.error(`TTS voiceMode failed for user ${userId}: ${ttsErr.message}`)
+        await ctx.reply('⚠️ TTS falló, mostrando texto:').catch(() => {})
+        const chunks = splitMessage(response, MAX_RESPONSE_LENGTH)
+        for (const chunk of chunks) await sendWithFallback(ctx, chunk)
+      }
+      return
+    }
+
+    // ── Normal text delivery ─────────────────────────────────────────────────
     const bg = sessionManager.getBackgroundTask(userId)
     if (bg?.transitionMsgId) {
       const prefix = `✅ *${activeAgent.name}* terminó:\n\n`
@@ -1011,6 +1127,13 @@ async function handleTask(ctx, forcedText) {
       }
     }
     sessionManager.clearBackgroundTask(userId)
+
+    // ── TTS button (if enabled by user) ─────────────────────────────────────
+    if (session.ttsButton) {
+      await ctx.reply('🔊', {
+        reply_markup: { inline_keyboard: [[{ text: '🔊 Escuchar', callback_data: 'tts_last' }]] },
+      }).catch(() => {})
+    }
   } catch (err) {
     clearAllTimers()
 
@@ -1259,6 +1382,18 @@ async function handlePing(ctx, agentKeyArg) {
     }
   }
 
+  // TTS status
+  const ttsStatus = global.__ttsEngine
+  const ttsVoice = process.env.TTS_VOICE || 'es-AR-TomasNeural'
+  if (ttsStatus === 'edge-tts') {
+    lines.push(`🔊 *TTS*: edge-tts ✅ (${ttsVoice})`)
+  } else if (ttsStatus === 'say') {
+    const { getSayVoice } = require('../utils/ttsService')
+    lines.push(`🔊 *TTS*: say ✅ fallback (${getSayVoice()})`)
+  } else {
+    lines.push(`🔊 *TTS*: ❌ no disponible`)
+  }
+
   await ctx.reply(lines.join('\n\n'), { parse_mode: 'Markdown' })
 }
 
@@ -1315,6 +1450,11 @@ module.exports = {
   handleAuto,
   handleAutoMode,
   handleDefault,
+  // TTS
+  handleVoiceMode,
+  handleTtsButton,
+  handleVoz,
+  handleTtsCallback,
   // Inline callbacks
   handleNewAgentCliSelect,
   handleDelAgentConfirm,

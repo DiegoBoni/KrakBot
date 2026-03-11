@@ -46,11 +46,14 @@ class SessionManager {
         lastActivity: Date.now(),
         taskCount: data.taskCount ?? 0,
         autoMode: data.autoMode ?? false,
+        voiceMode: data.voiceMode ?? false,
+        ttsButton: data.ttsButton ?? false,
         onboarding: null,
         backgroundTask: null,
         newAgentFlow: null,
         editAgentFlow: null,
         pendingFile: null,
+        lastResponse: null,
       }
     } catch (err) {
       if (err.code !== 'ENOENT') {
@@ -69,6 +72,8 @@ class SessionManager {
       history: session.history,
       taskCount: session.taskCount,
       autoMode: session.autoMode ?? false,
+      voiceMode: session.voiceMode ?? false,
+      ttsButton: session.ttsButton ?? false,
       savedAt: new Date().toISOString(),
     }, null, 2)
     try {
@@ -100,11 +105,14 @@ class SessionManager {
         lastActivity: Date.now(),
         taskCount: 0,
         autoMode: false,
+        voiceMode: false,
+        ttsButton: false,
         onboarding: null,
         backgroundTask: null,
         newAgentFlow: null,
         editAgentFlow: null,
         pendingFile: null,
+        lastResponse: null,
       }
       this._sessions.set(key, session)
       logger.debug(`Session created for user ${userId} (agent: ${session.agent})`)
@@ -304,6 +312,65 @@ class SessionManager {
   clearPendingFile(userId) {
     const session = this.getOrCreate(userId)
     session.pendingFile = null
+  }
+
+  /**
+   * Sets the voiceMode flag for a user and persists it to disk.
+   * @param {number|string} userId
+   * @param {boolean} enabled
+   */
+  setVoiceMode(userId, enabled) {
+    const session = this.getOrCreate(userId)
+    session.voiceMode = !!enabled
+    this._saveToDisk(session)
+  }
+
+  /**
+   * Returns the voiceMode flag for a user.
+   * @param {number|string} userId
+   * @returns {boolean}
+   */
+  getVoiceMode(userId) {
+    return this.getOrCreate(userId).voiceMode ?? false
+  }
+
+  /**
+   * Sets the ttsButton flag for a user and persists it to disk.
+   * @param {number|string} userId
+   * @param {boolean} enabled
+   */
+  setTtsButton(userId, enabled) {
+    const session = this.getOrCreate(userId)
+    session.ttsButton = !!enabled
+    this._saveToDisk(session)
+  }
+
+  /**
+   * Returns the ttsButton flag for a user.
+   * @param {number|string} userId
+   * @returns {boolean}
+   */
+  getTtsButton(userId) {
+    return this.getOrCreate(userId).ttsButton ?? false
+  }
+
+  /**
+   * Stores the last text response for a user (in-memory only, never persisted).
+   * @param {number|string} userId
+   * @param {string} text
+   */
+  setLastResponse(userId, text) {
+    const session = this.getOrCreate(userId)
+    session.lastResponse = text ?? null
+  }
+
+  /**
+   * Returns the last text response for a user, or null.
+   * @param {number|string} userId
+   * @returns {string|null}
+   */
+  getLastResponse(userId) {
+    return this.getOrCreate(userId).lastResponse ?? null
   }
 
   /**

@@ -28,6 +28,11 @@ const {
   handleAuto,
   handleAutoMode,
   handleDefault,
+  // TTS
+  handleVoiceMode,
+  handleTtsButton,
+  handleVoz,
+  handleTtsCallback,
   // Inline callbacks
   handleNewAgentCliSelect,
   handleDelAgentConfirm,
@@ -107,6 +112,11 @@ function createBot() {
   bot.command('auto',      handleAuto)
   bot.command('automode',  handleAutoMode)
 
+  // TTS commands
+  bot.command('voicemode', handleVoiceMode)
+  bot.command('ttsbutton', handleTtsButton)
+  bot.command('voz',       handleVoz)
+
   // ─── Inline keyboard actions ───────────────────────────────────────────────
 
   // Update notification
@@ -144,6 +154,9 @@ function createBot() {
     await ctx.answerCbQuery().catch(() => {})
     await handleEditAgentCancel(ctx)
   })
+
+  // TTS: listen button
+  bot.action('tts_last', async (ctx) => { await handleTtsCallback(ctx) })
 
   // setagent inline button (from /agentes list)
   bot.action(/^setagent:(.+)$/, async (ctx) => {

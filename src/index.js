@@ -11,6 +11,7 @@ const { ensureTempDir, checkWhisper } = require('./utils/audioTranscriber')
 const updateChecker = require('./utils/updateChecker')
 const customAgentManager = require('./utils/customAgentManager')
 const fileManager = require('./utils/fileManager')
+const ttsService = require('./utils/ttsService')
 
 async function main() {
   logger.info('🚀 Telegram AI Gateway arrancando...')
@@ -48,6 +49,15 @@ async function main() {
   } else {
     logger.warn('mlx_whisper no encontrado — transcripción de audio no disponible')
   }
+
+  // Check TTS availability
+  const ttsStatus = await ttsService.checkTTS()
+  if (ttsStatus.engine) {
+    logger.info(`🔊 TTS disponible: ${ttsStatus.engine} (voz: ${ttsStatus.voice})`)
+  } else {
+    logger.warn('TTS no disponible — ni edge-tts ni say encontrados')
+  }
+  global.__ttsEngine = ttsStatus.engine ?? null
 
   const bot = createBot()
 
@@ -94,7 +104,10 @@ async function main() {
     { command: 'limpiar',   description: 'Borrar historial de la sesión' },
     { command: 'ayuda',     description: 'Instrucciones de uso' },
     { command: 'ping',      description: 'Health check de los agentes' },
-    { command: 'update',    description: 'Chequear actualizaciones disponibles' },
+    { command: 'update',     description: 'Chequear actualizaciones disponibles' },
+    { command: 'voicemode',  description: 'Solo audio: activar/desactivar respuestas en voz' },
+    { command: 'ttsbutton',  description: 'Activar/desactivar botón 🔊 en respuestas' },
+    { command: 'voz',        description: 'Convertir última respuesta a audio' },
   ])
 
   logger.info(`✅ Bot corriendo: @${bot.botInfo?.username ?? 'unknown'}`)
