@@ -10,6 +10,7 @@ const { AGENTS } = require('./agents/router')
 const { ensureTempDir, checkWhisper } = require('./utils/audioTranscriber')
 const updateChecker = require('./utils/updateChecker')
 const customAgentManager = require('./utils/customAgentManager')
+const fileManager = require('./utils/fileManager')
 
 async function main() {
   logger.info('🚀 Telegram AI Gateway arrancando...')
@@ -21,6 +22,15 @@ async function main() {
     logger.debug(`Sessions dir ready: ${sessionsDir}`)
   } catch (err) {
     logger.error(`No se pudo crear data/sessions/: ${err.message}`)
+  }
+
+  // Ensure uploads directory exists (non-fatal).
+  const uploadsDir = path.resolve(__dirname, '../data/uploads')
+  try {
+    mkdirSync(uploadsDir, { recursive: true })
+    logger.debug(`Uploads dir ready: ${uploadsDir}`)
+  } catch (err) {
+    logger.warn(`No se pudo crear data/uploads/: ${err.message}`)
   }
 
   // Initialize custom agent store (creates data/custom-agents.json if needed)
@@ -44,9 +54,10 @@ async function main() {
   // Init auto-updater with bot instance (must happen before bot.launch)
   updateChecker.init(bot)
 
-  // Periodic cleanup of stale sessions (every hour)
-  const cleanupInterval = setInterval(() => {
+  // Periodic cleanup of stale sessions and expired uploads (every hour)
+  const cleanupInterval = setInterval(async () => {
     sessionManager.cleanup()
+    await fileManager.cleanupExpiredUploads()
     logger.debug(`Active sessions: ${sessionManager.size}`)
   }, 60 * 60 * 1000)
 

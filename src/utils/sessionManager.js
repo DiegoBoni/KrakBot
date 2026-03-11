@@ -50,6 +50,7 @@ class SessionManager {
         backgroundTask: null,
         newAgentFlow: null,
         editAgentFlow: null,
+        pendingFile: null,
       }
     } catch (err) {
       if (err.code !== 'ENOENT') {
@@ -103,6 +104,7 @@ class SessionManager {
         backgroundTask: null,
         newAgentFlow: null,
         editAgentFlow: null,
+        pendingFile: null,
       }
       this._sessions.set(key, session)
       logger.debug(`Session created for user ${userId} (agent: ${session.agent})`)
@@ -273,6 +275,35 @@ class SessionManager {
    */
   getAutoMode(userId) {
     return this.getOrCreate(userId).autoMode ?? false
+  }
+
+  /**
+   * Stores a pending file attachment for a user (in-memory only, never persisted).
+   * @param {number|string} userId
+   * @param {{ localPath, originalName, fileType, size, savedAt }} fileInfo
+   */
+  setPendingFile(userId, fileInfo) {
+    const session = this.getOrCreate(userId)
+    session.pendingFile = fileInfo
+  }
+
+  /**
+   * Returns the pending file attachment for a user, or null.
+   * @param {number|string} userId
+   * @returns {object|null}
+   */
+  getPendingFile(userId) {
+    const session = this.getOrCreate(userId)
+    return session.pendingFile ?? null
+  }
+
+  /**
+   * Clears the pending file attachment for a user.
+   * @param {number|string} userId
+   */
+  clearPendingFile(userId) {
+    const session = this.getOrCreate(userId)
+    session.pendingFile = null
   }
 
   /**

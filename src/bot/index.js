@@ -11,6 +11,8 @@ const {
   handleSession,
   handleClearHistory,
   handleTask,
+  handlePhoto,
+  handleDocument,
   handleVoice,
   handlePing,
   handleSoul,
@@ -158,6 +160,10 @@ function createBot() {
       ctx.reply('❌ Error inesperado.').catch(() => {})
     })
   })
+
+  // ─── Photo / document messages → file attachment dispatch ─────────────────
+  bot.on('photo',    (ctx) => { handlePhoto(ctx).catch((err)    => logger.error(`Unhandled photo error: ${err.message}`)) })
+  bot.on('document', (ctx) => { handleDocument(ctx).catch((err) => logger.error(`Unhandled document error: ${err.message}`)) })
 
   // ─── Voice / audio messages → transcription + dispatch ────────────────────
   bot.on('voice', (ctx) => { handleVoice(ctx).catch((err) => logger.error(`Unhandled voice error: ${err.message}`)) })

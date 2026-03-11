@@ -3,6 +3,7 @@ const sessionManager = require('../utils/sessionManager')
 const soulManager = require('../utils/soulManager')
 const memoryManager = require('../utils/memoryManager')
 const customAgentManager = require('../utils/customAgentManager')
+const fileManager = require('../utils/fileManager')
 const logger = require('../utils/logger')
 const { transcribe, checkWhisper } = require('../utils/audioTranscriber')
 
@@ -307,6 +308,12 @@ async function handleClearHistory(ctx) {
       await ctx.telegram.deleteMessage(ctx.chat.id, bg.transitionMsgId).catch(() => {})
     }
     sessionManager.clearBackgroundTask(userId)
+  }
+  // Clean up any pending file attachment
+  const pending = sessionManager.getPendingFile(userId)
+  if (pending?.localPath) {
+    fileManager.cleanupFile(pending.localPath)
+    sessionManager.clearPendingFile(userId)
   }
   sessionManager.clearHistory(userId)
   await ctx.reply('🗑 Historial borrado. La siguiente respuesta comenzará sin contexto previo.')
@@ -656,8 +663,8 @@ async function handleEditAgentCancel(ctx) {
 
 // ─── Main task handler ─────────────────────────────────────────────────────────
 
-async function handleTask(ctx) {
-  const text = ctx.message.text?.trim()
+async function handleTask(ctx, forcedText) {
+  const text = (forcedText ?? ctx.message?.text)?.trim()
   if (!text) return
 
   const userId = ctx.from.id
@@ -802,6 +809,49 @@ async function handleTask(ctx) {
     }
   }
 
+  // ─── File attachment handling ──────────────────────────────────────────────
+
+  const pendingFile = sessionManager.getPendingFile(userId)
+  let fileOpts = {}
+  let pendingFileForCleanup = null
+
+  if (pendingFile) {
+    pendingFileForCleanup = pendingFile
+    sessionManager.clearPendingFile(userId)
+
+    if (pendingFile.fileType === 'text') {
+      try {
+        const content = fileManager.readTextFile(pendingFile.localPath, 50_000)
+        fileOpts = { fileContent: content, fileName: pendingFile.originalName }
+      } catch (err) {
+        logger.warn(`No se pudo leer el archivo ${pendingFile.originalName}: ${err.message}`)
+        await ctx.reply(
+          `⚠️ No pude leer *${pendingFile.originalName}*. Continúo sin él.`,
+          { parse_mode: 'Markdown' }
+        )
+        fileManager.cleanupFile(pendingFile.localPath)
+        pendingFileForCleanup = null
+      }
+    } else {
+      // image or binary (PDF) — determine actual CLI backend
+      const activeKey = agentKey || session.agent
+      let actualCli = activeKey
+      if (activeKey.startsWith('custom:')) {
+        const def = customAgentManager.get(activeKey.slice(7))
+        actualCli = def?.cli ?? 'claude'
+      }
+      if (actualCli !== 'claude') {
+        await ctx.reply(
+          '⚠️ Solo Claude puede procesar imágenes y PDFs.\n' +
+          'Cambiá a Claude con /claude o usá un agente con motor Claude.'
+        )
+        fileManager.cleanupFile(pendingFile.localPath)
+        return
+      }
+      fileOpts = { filePath: pendingFile.localPath, fileName: pendingFile.originalName }
+    }
+  }
+
   // T8: 3-phase timer system
   const controller = new AbortController()
   const { signal } = controller
@@ -905,7 +955,7 @@ async function handleTask(ctx) {
       scheduleStreamEdit()
     }
 
-    const response = await dispatchStreaming(agentKey, prompt, session, signal, onStreamChunk)
+    const response = await dispatchStreaming(agentKey, prompt, session, signal, onStreamChunk, fileOpts)
     clearAllTimers()
 
     const effectiveAgent = agentKey || session.agent
@@ -985,7 +1035,111 @@ async function handleTask(ctx) {
     if (statusMsg) {
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {})
     }
+    if (pendingFileForCleanup?.localPath) {
+      fileManager.cleanupFile(pendingFileForCleanup.localPath)
+    }
   }
+}
+
+// ─── Photo / document handlers ────────────────────────────────────────────────
+
+async function handlePhoto(ctx) {
+  const userId = ctx.from?.id
+  if (!userId) return
+
+  const photo = ctx.message.photo?.at(-1)
+  if (!photo) return
+
+  if (photo.file_size && photo.file_size > fileManager.getMaxFileSizeBytes()) {
+    return ctx.reply(
+      `⚠️ La imagen supera el límite de ${process.env.MAX_FILE_SIZE_MB || 20} MB.`
+    )
+  }
+
+  // Clean up previous pending file if any
+  const existing = sessionManager.getPendingFile(userId)
+  if (existing?.localPath) fileManager.cleanupFile(existing.localPath)
+
+  await ctx.sendChatAction('upload_photo').catch(() => {})
+
+  let downloadResult
+  try {
+    downloadResult = await fileManager.downloadTelegramFile(
+      ctx.telegram, photo.file_id, userId, 'photo.jpg'
+    )
+  } catch (err) {
+    logger.error(`Error descargando foto para user ${userId}: ${err.message}`)
+    return ctx.reply('❌ No pude descargar la imagen. Intentá de nuevo.')
+  }
+
+  sessionManager.setPendingFile(userId, {
+    localPath: downloadResult.localPath,
+    originalName: 'photo.jpg',
+    fileType: 'image',
+    size: downloadResult.size,
+    savedAt: new Date().toISOString(),
+  })
+
+  const caption = ctx.message.caption?.trim()
+  if (caption) return handleTask(ctx, caption)
+  await ctx.reply('📎 Imagen recibida. ¿Qué querés que haga con ella?')
+}
+
+async function handleDocument(ctx) {
+  const userId = ctx.from?.id
+  if (!userId) return
+
+  const doc = ctx.message.document
+  if (!doc) return
+
+  const validation = fileManager.validateFile(doc.mime_type, doc.file_name ?? '')
+  if (!validation.ok) {
+    return ctx.reply(
+      `⚠️ ${validation.reason}\n\n` +
+      `Formatos soportados: imágenes (jpg, png, webp, gif), PDF, y archivos de texto/código ` +
+      `(py, js, ts, json, csv, yaml, md, txt, etc.)`
+    )
+  }
+
+  if (doc.file_size && doc.file_size > fileManager.getMaxFileSizeBytes()) {
+    return ctx.reply(
+      `⚠️ El archivo supera el límite de ${process.env.MAX_FILE_SIZE_MB || 20} MB.`
+    )
+  }
+
+  // Clean up previous pending file if any
+  const existing = sessionManager.getPendingFile(userId)
+  if (existing?.localPath) fileManager.cleanupFile(existing.localPath)
+
+  await ctx.sendChatAction('upload_document').catch(() => {})
+
+  let downloadResult
+  try {
+    downloadResult = await fileManager.downloadTelegramFile(
+      ctx.telegram, doc.file_id, userId, doc.file_name ?? 'archivo'
+    )
+  } catch (err) {
+    logger.error(`Error descargando documento para user ${userId}: ${err.message}`)
+    return ctx.reply('❌ No pude descargar el archivo. Intentá de nuevo.')
+  }
+
+  sessionManager.setPendingFile(userId, {
+    localPath: downloadResult.localPath,
+    originalName: doc.file_name ?? 'archivo',
+    fileType: validation.fileType,
+    size: downloadResult.size,
+    savedAt: new Date().toISOString(),
+  })
+
+  const emoji = fileManager.fileEmoji(doc.file_name ?? '')
+  const sizeStr = fileManager.formatSize(downloadResult.size)
+
+  const caption = ctx.message.caption?.trim()
+  if (caption) return handleTask(ctx, caption)
+  await ctx.reply(
+    `${emoji} Recibí *${doc.file_name}* (${sizeStr}). ¿Qué querés que haga con él?`,
+    { parse_mode: 'Markdown' }
+  )
 }
 
 // ─── Voice / audio handler ────────────────────────────────────────────────────
@@ -1144,6 +1298,8 @@ module.exports = {
   handleSession,
   handleClearHistory,
   handleTask,
+  handlePhoto,
+  handleDocument,
   handleVoice,
   handlePing,
   handleSoul,
