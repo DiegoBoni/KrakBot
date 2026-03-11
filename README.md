@@ -11,7 +11,7 @@
 # KrakBot
 
 > Gateway de Telegram hacia múltiples agentes de IA CLI — Claude Code, Gemini CLI y OpenAI Codex CLI.
-> Un mensaje, el agente que elijas, respuesta directo en el chat.
+> Un mensaje (o un archivo), el agente que elijas, respuesta directo en el chat.
 > Creá agentes personalizados con system prompts propios y un Root Agent que los orquesta automáticamente.
 
 ---
@@ -73,6 +73,7 @@ npm start
 | `ROOT_AGENT_CLI`      | `claude`  | CLI que actúa como Root Agent para routing automático        |
 | `HISTORY_WINDOW`      | `6`       | Pares de mensajes a conservar en el historial de contexto    |
 | `SESSION_TTL_HOURS`   | `0`       | Horas de inactividad para expirar sesión (0 = nunca)         |
+| `MAX_FILE_SIZE_MB`    | `20`      | Tamaño máximo de archivo aceptado vía Telegram (en MB)       |
 
 ---
 
@@ -207,6 +208,50 @@ El estado del automode se muestra en `/sesion` y se persiste entre reinicios.
 
 ---
 
+## Archivos adjuntos
+
+Podés enviarle imágenes, PDFs y archivos de texto/código directamente desde Telegram.
+
+### Cómo usarlo
+
+**Con caption (prompt incluido):**
+Adjuntá el archivo y escribí la consulta como descripción del mensaje. El bot lo procesa de inmediato.
+
+```
+[foto de un diagrama] ¿Qué estructura de datos representa esto?
+[archivo main.py]     Revisá si hay bugs en este código
+[factura.pdf]         Extraé el total y el CUIT del emisor
+```
+
+**Sin caption:**
+El archivo queda en espera. Tu próximo mensaje de texto lo usa como contexto.
+
+```
+[adjuntás codigo.js]          ← queda pendiente
+"optimizá la función principal"  ← este mensaje lo recibe con el archivo
+```
+
+### Formatos soportados
+
+| Tipo          | Extensiones / MIME                                | Agentes compatibles       |
+|---------------|---------------------------------------------------|---------------------------|
+| Imágenes      | jpg, jpeg, png, gif, webp, bmp, tiff, svg, ico    | Claude (y custom Claude)  |
+| PDFs          | pdf                                               | Claude (y custom Claude)  |
+| Texto / código| txt, md, csv, json, xml, yaml, html, css, js, ts, py, java, c, cpp, go, rs, rb, php, sh, sql… | Todos los agentes |
+
+> Gemini y Codex solo soportan archivos de texto. Los archivos binarios (imágenes, PDFs) se rechazan con un aviso si el agente activo no es Claude.
+
+### Límite de tamaño
+
+Por defecto **20 MB** (configurable con `MAX_FILE_SIZE_MB` en el `.env`).
+Telegram impone su propio límite de 20 MB para bots, por lo que valores mayores no tienen efecto práctico.
+
+### Limpieza automática
+
+Los archivos se eliminan del disco inmediatamente después de ser procesados. Un proceso de limpieza horario borra cualquier archivo huérfano con más de 1 hora de antigüedad.
+
+---
+
 ## Menciones de agente
 
 Prefijá cualquier mensaje con `@alias` para usar un agente específico solo en esa respuesta,
@@ -252,25 +297,29 @@ src/
 │   ├── customAgentManager.js # CRUD de agentes personalizados (persiste en data/)
 │   ├── cliValidator.js       # Validación de binarios CLI al arranque
 │   ├── audioTranscriber.js   # Transcripción de notas de voz con mlx_whisper
+│   ├── fileManager.js        # Descarga, validación, lectura y limpieza de archivos adjuntos
 │   └── updateChecker.js      # Auto-updater desde GitHub
 └── index.js                  # Entry point: arranque, validación, shutdown graceful
 
 data/                         # Generado en runtime, excluido de git
 ├── sessions/                 # Sesiones persistidas por usuario (JSON)
+├── uploads/                  # Archivos adjuntos temporales (se borran tras procesar)
 └── custom-agents.json        # Definiciones de agentes personalizados
 ```
 
 **Flujo de un mensaje:**
 
 ```
-Telegram msg
+Telegram msg / archivo
   → middleware.js       (auth check)
-  → handlers.js         (extrae @alias, detecta flows activos o autoMode)
+  → handlers.js         (descarga archivo si aplica, extrae @alias, detecta flows activos o autoMode)
+  → fileManager.js      (valida tipo y tamaño, guarda en data/uploads/<userId>/)
   → router.js           (Root Agent si autoMode, luego resuelve agente)
   → custom agent        (inyecta system prompt vía --append-system-prompt o inline)
-    o claude|gemini|codex.js  (construye contexto con soul + memorias + historial)
-  → runner.js           (spawn CLI, timeout, heartbeat cada 30s)
+    o claude|gemini|codex.js  (construye contexto con soul + memorias + historial + archivo)
+  → runner.js           (spawn CLI con @/ruta para binarios o [ARCHIVO] para texto, timeout, heartbeat cada 30s)
   → respuesta en chunks ≤4000 chars → Telegram
+  → fileManager.js      (borra el archivo del disco)
 ```
 
 ---
@@ -282,3 +331,6 @@ Telegram msg
 - Las API keys nunca se loguean, solo se verifica su presencia al arranque.
 - Los CLIs corren con `cwd` en `HOME` para que no levanten archivos del proyecto.
 - Los datos de sesión y agentes custom se guardan en `data/` (local, no en el repositorio).
+- Los archivos adjuntos se guardan con nombres UUID en `data/uploads/<userId>/` — sin riesgo de path traversal.
+- Los archivos se eliminan del disco inmediatamente después de ser procesados por el agente.
+- El tipo de archivo se valida por MIME type y extensión antes de ser aceptado.
