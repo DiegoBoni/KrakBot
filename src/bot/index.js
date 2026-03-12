@@ -31,10 +31,16 @@ const {
   // TTS
   handleVoiceMode,
   handleTtsButton,
-  handleVoz,
+  handleListen,
+  handleTtsVoice,
   handleTtsCallback,
   // Inline callbacks
+  handleNewAgentVoiceLangSelect,
+  handleNewAgentVoiceSelect,
   handleNewAgentCliSelect,
+  // TTS voice picker
+  handleTtsVoiceLangSelect,
+  handleTtsVoiceSelect,
   handleDelAgentConfirm,
   handleDelAgentCancel,
   handleEditAgentFieldSelect,
@@ -76,9 +82,9 @@ function createBot() {
   // ─── Commands ──────────────────────────────────────────────────────────────
   bot.command('start', handleStart)
   bot.command(['help', 'ayuda'], handleHelp)
-  bot.command('agentes', handleListAgents)
-  bot.command('sesion', handleSession)
-  bot.command('limpiar', handleClearHistory)
+  bot.command(['agents', 'agentes'], handleListAgents)
+  bot.command(['session', 'sesion'], handleSession)
+  bot.command(['clear', 'limpiar'], handleClearHistory)
 
   // Agent-switching commands
   bot.command('claude', (ctx) => handleSetAgent(ctx, 'claude'))
@@ -115,7 +121,8 @@ function createBot() {
   // TTS commands
   bot.command('voicemode', handleVoiceMode)
   bot.command('ttsbutton', handleTtsButton)
-  bot.command('voz',       handleVoz)
+  bot.command(['listen', 'voz'], handleListen)
+  bot.command('ttsvoice',  handleTtsVoice)
 
   // ─── Inline keyboard actions ───────────────────────────────────────────────
 
@@ -123,6 +130,52 @@ function createBot() {
   bot.action('update_yes',    async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await updateChecker.handleUpdateYes(ctx) })
   bot.action('update_remind', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await updateChecker.handleUpdateRemind(ctx) })
   bot.action('update_ignore', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await updateChecker.handleUpdateIgnore(ctx) })
+
+  // newagent: voice language selection
+  bot.action(/^newagent_vl:(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {})
+    await handleNewAgentVoiceLangSelect(ctx, ctx.match[1])
+  })
+
+  // newagent: voice selection (full voice name)
+  bot.action(/^newagent_vs:(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {})
+    await handleNewAgentVoiceSelect(ctx, ctx.match[1])
+  })
+
+  // newagent: voice back (show language picker again)
+  bot.action('newagent_vback', async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {})
+    const { VOICE_CATALOG } = require('../utils/ttsService')
+    const rows = []
+    for (let i = 0; i < VOICE_CATALOG.length; i += 2) {
+      const row = [{ text: VOICE_CATALOG[i].lang, callback_data: `newagent_vl:${i}` }]
+      if (VOICE_CATALOG[i + 1]) row.push({ text: VOICE_CATALOG[i + 1].lang, callback_data: `newagent_vl:${i + 1}` })
+      rows.push(row)
+    }
+    await ctx.editMessageText('🔊 *¿Qué voz usará este agente?*\nElegí el idioma:', {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: rows },
+    }).catch(() => {})
+  })
+
+  // ttsvoice: language selection
+  bot.action(/^ttsvoice_l:(\d+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {})
+    await handleTtsVoiceLangSelect(ctx, ctx.match[1])
+  })
+
+  // ttsvoice: voice selection
+  bot.action(/^ttsvoice_s:(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {})
+    await handleTtsVoiceSelect(ctx, ctx.match[1])
+  })
+
+  // ttsvoice: back to language picker
+  bot.action('ttsvoice_back', async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {})
+    await handleTtsVoice(ctx)
+  })
 
   // newagent: CLI selection
   bot.action(/^newagent_cli:(.+)$/, async (ctx) => {

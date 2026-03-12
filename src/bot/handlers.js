@@ -5,6 +5,8 @@ const memoryManager = require('../utils/memoryManager')
 const customAgentManager = require('../utils/customAgentManager')
 const fileManager = require('../utils/fileManager')
 const ttsService = require('../utils/ttsService')
+const { VOICE_CATALOG } = ttsService
+const { createReadStream } = require('fs')
 const logger = require('../utils/logger')
 const { transcribe, checkWhisper } = require('../utils/audioTranscriber')
 
@@ -174,7 +176,7 @@ async function handleHelp(ctx) {
     `/setagent <id> — activar un custom agent\n\n` +
     `*Custom Agents:*\n` +
     `/newagent — crear un agente especializado\n` +
-    `/agentes — ver todos los agentes\n` +
+    `/agents — ver todos los agentes\n` +
     `/editagent <id> — editar un agente\n` +
     `/delagent <id> — borrar un agente\n\n` +
     `*Root Agent:*\n` +
@@ -188,9 +190,14 @@ async function handleHelp(ctx) {
     `/remember <texto> — guardar una memoria\n` +
     `/memories — listar memorias guardadas\n` +
     `/forget last|<id> — borrar una memoria\n\n` +
+    `*Voz y audio:*\n` +
+    `/voicemode — respuestas en audio\n` +
+    `/ttsbutton — botón 🔊 al pie de cada respuesta\n` +
+    `/listen — escuchar el último mensaje\n` +
+    `/ttsvoice — cambiar voz TTS\n\n` +
     `*Historial:*\n` +
     `Todos los agentes reciben las últimas 6 entradas como contexto.\n` +
-    `/limpiar para borrar el historial.\n\n` +
+    `/clear para borrar el historial.\n\n` +
     `*Límite de respuesta:* ${MAX_RESPONSE_LENGTH} caracteres por mensaje (se divide automáticamente).`,
     { parse_mode: 'Markdown' }
   )
@@ -239,7 +246,17 @@ async function handleSetAgent(ctx, agentKey) {
       return
     }
     sessionManager.setAgent(ctx.from.id, agentKey)
-    await ctx.reply(`${def.emoji} Agente cambiado a *${def.name}*`, { parse_mode: 'Markdown' })
+    if (def.ttsVoice) {
+      sessionManager.setTtsVoice(ctx.from.id, def.ttsVoice)
+      sessionManager.setTtsGender(ctx.from.id, def.ttsGender ?? 'masc')
+    } else if (def.ttsGender) {
+      sessionManager.setTtsGender(ctx.from.id, def.ttsGender)
+    }
+    const voiceEntry = def.ttsVoice
+      ? VOICE_CATALOG.flatMap(g => g.voices).find(v => v.id === def.ttsVoice)
+      : null
+    const voiceLabel = voiceEntry?.label ?? (def.ttsGender === 'fem' ? 'Elena' : 'Tomás')
+    await ctx.reply(`${def.emoji} Agente cambiado a *${def.name}* (voz: ${voiceLabel})`, { parse_mode: 'Markdown' })
     return
   }
 
@@ -278,6 +295,11 @@ async function handleSession(ctx) {
   const { resolve } = require('path')
   const persisted = existsSync(resolve(__dirname, `../../data/sessions/${ctx.from.id}.json`))
 
+  const ttsVoice = session.ttsVoice
+  const ttsVoiceLabel = ttsVoice
+    ? (VOICE_CATALOG.flatMap(g => g.voices).find(v => v.id === ttsVoice)?.label ?? ttsVoice)
+    : (session.ttsGender === 'fem' ? 'Elena (default)' : 'Tomás (default)')
+
   await ctx.reply(
     `📋 *Tu sesión*\n\n` +
     `ID: \`${session.id.slice(0, 8)}...\`\n` +
@@ -285,6 +307,7 @@ async function handleSession(ctx) {
     `🧠 autoMode: *${session.autoMode ? 'ON' : 'OFF'}*\n` +
     `🎙️ Modo voz: *${session.voiceMode ? 'ON' : 'OFF'}*\n` +
     `🔊 Botón audio: *${session.ttsButton ? 'ON' : 'OFF'}*\n` +
+    `🗣️ Voz TTS: *${ttsVoiceLabel}*\n` +
     `💬 Mensajes en historial: ${session.history.length}\n` +
     `📊 Tareas totales: ${session.taskCount}\n` +
     `💾 Historial persistido: ${persisted ? 'sí' : 'no'}\n` +
@@ -576,6 +599,49 @@ async function handleNewAgentCliSelect(ctx, cli) {
   }
 }
 
+async function handleNewAgentVoiceLangSelect(ctx, langIdxStr) {
+  const userId = ctx.from.id
+  const session = sessionManager.getOrCreate(userId)
+  if (!session.newAgentFlow || session.newAgentFlow.step !== 'awaiting_voice') {
+    await ctx.editMessageText('Este flow ya expiró. Usá /newagent para empezar de nuevo.').catch(() => {})
+    return
+  }
+  const langIdx = parseInt(langIdxStr)
+  const keyboard = buildVoiceKeyboard(langIdx, 'newagent_vs', `newagent_vback`)
+  if (!keyboard) {
+    await ctx.editMessageText('Idioma no encontrado.').catch(() => {})
+    return
+  }
+  const group = VOICE_CATALOG[langIdx]
+  await ctx.editMessageText(
+    `🗣️ *${group.lang}* — elegí la voz del agente:`,
+    { parse_mode: 'Markdown', reply_markup: keyboard }
+  ).catch(() => {})
+}
+
+async function handleNewAgentVoiceSelect(ctx, voiceName) {
+  const userId = ctx.from.id
+  const session = sessionManager.getOrCreate(userId)
+  if (!session.newAgentFlow || session.newAgentFlow.step !== 'awaiting_voice') {
+    await ctx.editMessageText('Este flow ya expiró. Usá /newagent para empezar de nuevo.').catch(() => {})
+    return
+  }
+  const entry = VOICE_CATALOG.flatMap(g => g.voices).find(v => v.id === voiceName)
+  session.newAgentFlow.answers.ttsVoice = voiceName
+  session.newAgentFlow.answers.ttsGender = entry?.gender ?? 'masc'
+  session.newAgentFlow.step = 'awaiting_cli'
+  const cliStatus = global.__cliStatus ?? {}
+  const buttons = ['claude', 'gemini', 'codex'].map(cli => {
+    const ok = cliStatus[cli]?.found !== false
+    return { text: `${ok ? '✅' : '⚠️'} ${cli}`, callback_data: `newagent_cli:${cli}` }
+  })
+  await ctx.editMessageText('¿Qué CLI usás como motor?', {
+    reply_markup: { inline_keyboard: [buttons] },
+  }).catch(async () => {
+    await ctx.reply('¿Qué CLI usás como motor?', { reply_markup: { inline_keyboard: [buttons] } })
+  })
+}
+
 // ─── Inline keyboard callbacks — delagent ──────────────────────────────────────
 
 async function handleDelAgentConfirm(ctx, id) {
@@ -664,18 +730,65 @@ async function handleEditAgentCancel(ctx) {
   await ctx.editMessageText('Cancelado.', { reply_markup: { inline_keyboard: [] } }).catch(() => {})
 }
 
-// ─── TTS helpers & handlers ────────────────────────────────────────────────────
+// ─── TTS voice picker helpers ──────────────────────────────────────────────────
 
 /**
- * Generates TTS audio from text and sends it as a Telegram voice note.
- * Deletes the temp file after sending (or on error).
- * @param {object} ctx  Telegraf context
- * @param {string} text  Raw text (will be sanitized inside ttsService)
+ * Builds the inline keyboard for language selection.
+ * @param {string} cbPrefix  e.g. 'ttsvoice_l' or 'newagent_vl'
  */
-async function sendTtsAudio(ctx, text) {
-  const audioPath = await ttsService.generateAudio(text)
+function buildLangKeyboard(cbPrefix) {
+  const rows = []
+  for (let i = 0; i < VOICE_CATALOG.length; i += 2) {
+    const row = [{ text: VOICE_CATALOG[i].lang, callback_data: `${cbPrefix}:${i}` }]
+    if (VOICE_CATALOG[i + 1]) {
+      row.push({ text: VOICE_CATALOG[i + 1].lang, callback_data: `${cbPrefix}:${i + 1}` })
+    }
+    rows.push(row)
+  }
+  return { inline_keyboard: rows }
+}
+
+/**
+ * Builds the inline keyboard for voice selection within a language group.
+ * @param {number} langIdx  Index in VOICE_CATALOG
+ * @param {string} cbPrefix  e.g. 'ttsvoice_s' or 'newagent_vs'
+ * @param {string} backCb    callback_data for the ← Back button
+ */
+function buildVoiceKeyboard(langIdx, cbPrefix, backCb) {
+  const group = VOICE_CATALOG[langIdx]
+  if (!group) return null
+  const voiceRow = group.voices.map(v => ({
+    text: `${v.gender === 'fem' ? '👩' : '🗣️'} ${v.label}`,
+    callback_data: `${cbPrefix}:${v.id}`,
+  }))
+  return { inline_keyboard: [voiceRow, [{ text: '← Volver', callback_data: backCb }]] }
+}
+
+// ─── TTS helpers & handlers ────────────────────────────────────────────────────
+
+/** Returns the effective TTS voice for a userId (full name or gender fallback). */
+function getEffectiveVoice(userId) {
+  return sessionManager.getTtsVoice(userId) || sessionManager.getTtsGender(userId)
+}
+
+/**
+ * Generates TTS audio from text and sends it as a Telegram voice note (OGG Opus).
+ * Deletes the temp file after sending (or on error).
+ * @param {object} ctx           Telegraf context
+ * @param {string} text          Raw text (sanitized inside ttsService)
+ * @param {string} [voiceOrGender]  Full voice name or 'masc'/'fem'
+ */
+async function sendTtsAudio(ctx, text, voiceOrGender) {
+  logger.info(`[TTS] generateAudio start — voice=${voiceOrGender} textLen=${text?.length}`)
+  const audioPath = await ttsService.generateAudio(text, voiceOrGender)
+  logger.info(`[TTS] generateAudio OK — file=${audioPath}`)
   try {
-    await ctx.replyWithVoice({ source: audioPath })
+    logger.info(`[TTS] replyWithVoice start`)
+    await ctx.replyWithVoice({ source: createReadStream(audioPath) })
+    logger.info(`[TTS] replyWithVoice OK`)
+  } catch (voiceErr) {
+    logger.error(`[TTS] replyWithVoice FAILED: ${voiceErr.message}`)
+    throw voiceErr
   } finally {
     await ttsService.deleteAudio(audioPath)
   }
@@ -717,25 +830,67 @@ async function handleTtsButton(ctx) {
   )
 }
 
-async function handleVoz(ctx) {
+async function handleListen(ctx) {
   const userId = ctx.from.id
-  const arg = ctx.message.text.replace(/^\/voz\s*/i, '').trim()
-  const textToConvert = arg || sessionManager.getLastResponse(userId)
+  const lastResponse = sessionManager.getLastResponse(userId)
 
-  if (!textToConvert) {
-    await ctx.reply('No hay respuesta reciente para convertir. Enviá un mensaje primero, o usá `/voz <texto>` para convertir un texto directo.', { parse_mode: 'Markdown' })
+  if (!lastResponse) {
+    await ctx.reply('No hay respuesta reciente para convertir. Enviá un mensaje primero.')
     return
   }
 
   const statusMsg = await ctx.reply('🎙️ Generando audio...').catch(() => null)
   try {
-    await sendTtsAudio(ctx, textToConvert)
+    await sendTtsAudio(ctx, lastResponse, getEffectiveVoice(userId))
   } catch (err) {
     logger.error(`TTS /voz failed for user ${userId}: ${err.message}`)
     await ctx.reply(`❌ No pude generar el audio: ${err.message.split('\n')[0].slice(0, 150)}`)
   } finally {
     if (statusMsg) await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {})
   }
+}
+
+async function handleTtsVoice(ctx) {
+  const userId = ctx.from.id
+  const current = sessionManager.getTtsVoice(userId)
+  const currentLabel = current
+    ? VOICE_CATALOG.flatMap(g => g.voices).find(v => v.id === current)?.label ?? current
+    : (sessionManager.getTtsGender(userId) === 'fem' ? 'Elena' : 'Tomás')
+  await ctx.reply(
+    `🔊 *Seleccioná el idioma de la voz*\n\nVoz actual: *${currentLabel}*`,
+    { parse_mode: 'Markdown', reply_markup: buildLangKeyboard('ttsvoice_l') }
+  )
+}
+
+async function handleTtsVoiceLangSelect(ctx, langIdxStr) {
+  const langIdx = parseInt(langIdxStr)
+  const keyboard = buildVoiceKeyboard(langIdx, 'ttsvoice_s', 'ttsvoice_back')
+  if (!keyboard) {
+    await ctx.editMessageText('Idioma no encontrado.').catch(() => {})
+    return
+  }
+  const group = VOICE_CATALOG[langIdx]
+  await ctx.editMessageText(
+    `🗣️ *${group.lang}* — elegí una voz:`,
+    { parse_mode: 'Markdown', reply_markup: keyboard }
+  ).catch(() => {})
+}
+
+async function handleTtsVoiceSelect(ctx, voiceName) {
+  const userId = ctx.from.id
+  const entry = VOICE_CATALOG.flatMap(g => g.voices).find(v => v.id === voiceName)
+  if (!entry) {
+    await ctx.editMessageText('Voz no encontrada.').catch(() => {})
+    return
+  }
+  sessionManager.setTtsVoice(userId, voiceName)
+  sessionManager.setTtsGender(userId, entry.gender)
+  await ctx.editMessageText(
+    `✅ Voz activada: *${entry.label}* (${voiceName})`,
+    { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [] } }
+  ).catch(async () => {
+    await ctx.reply(`✅ Voz activada: *${entry.label}*`, { parse_mode: 'Markdown' })
+  })
 }
 
 async function handleTtsCallback(ctx) {
@@ -747,7 +902,7 @@ async function handleTtsCallback(ctx) {
   }
   await ctx.answerCbQuery('Generando audio...').catch(() => {})
   try {
-    await sendTtsAudio(ctx, lastResponse)
+    await sendTtsAudio(ctx, lastResponse, getEffectiveVoice(userId))
   } catch (err) {
     logger.error(`TTS callback failed for user ${userId}: ${err.message}`)
     await ctx.reply(`❌ No pude generar el audio: ${err.message.split('\n')[0].slice(0, 150)}`)
@@ -805,19 +960,15 @@ async function handleTask(ctx, forcedText) {
     }
     if (flow.step === 'ask_system_prompt') {
       flow.answers.systemPrompt = text
-      flow.step = 'awaiting_cli'
-      const cliStatus = global.__cliStatus ?? {}
-      const buttons = ['claude', 'gemini', 'codex'].map(cli => {
-        const ok = cliStatus[cli]?.found !== false
-        return { text: `${ok ? '✅' : '⚠️'} ${cli}`, callback_data: `newagent_cli:${cli}` }
-      })
-      await ctx.reply('¿Qué CLI usás como motor?', {
-        reply_markup: { inline_keyboard: [buttons] },
-      })
+      flow.step = 'awaiting_voice'
+      await ctx.reply(
+        '🔊 *¿Qué voz usará este agente?*\nElegí el idioma:',
+        { parse_mode: 'Markdown', reply_markup: buildLangKeyboard('newagent_vl') }
+      )
       return
     }
-    // awaiting_cli — user must press a button
-    await ctx.reply('Tocá uno de los botones de arriba para elegir el CLI, o enviá un comando para cancelar.')
+    // awaiting_voice / awaiting_cli — user must press a button
+    await ctx.reply('Tocá uno de los botones de arriba, o enviá un comando para cancelar.')
     return
   }
 
@@ -1074,14 +1225,17 @@ async function handleTask(ctx, forcedText) {
     // Save last response for TTS callbacks (always, regardless of mode)
     sessionManager.setLastResponse(userId, response)
 
+    logger.info(`[TTS] post-response: voiceMode=${session.voiceMode} ttsButton=${session.ttsButton} for user ${userId}`)
+
     // ── voiceMode: send audio only, no text ──────────────────────────────────
     if (session.voiceMode) {
+      logger.info(`[TTS] voiceMode branch triggered for user ${userId}`)
       const finalMsgId = statusMsg?.message_id
       statusMsg = null
       if (finalMsgId) await ctx.telegram.deleteMessage(ctx.chat.id, finalMsgId).catch(() => {})
       sessionManager.clearBackgroundTask(userId)
       try {
-        await sendTtsAudio(ctx, response)
+        await sendTtsAudio(ctx, response, getEffectiveVoice(userId))
       } catch (ttsErr) {
         logger.error(`TTS voiceMode failed for user ${userId}: ${ttsErr.message}`)
         await ctx.reply('⚠️ TTS falló, mostrando texto:').catch(() => {})
@@ -1092,12 +1246,14 @@ async function handleTask(ctx, forcedText) {
     }
 
     // ── Normal text delivery ─────────────────────────────────────────────────
+    let lastSentMsgId = null
     const bg = sessionManager.getBackgroundTask(userId)
     if (bg?.transitionMsgId) {
       const prefix = `✅ *${activeAgent.name}* terminó:\n\n`
       const chunks = splitMessage(prefix + response, MAX_RESPONSE_LENGTH)
       for (const chunk of chunks) {
-        await sendWithFallback(ctx, chunk)
+        const sent = await sendWithFallback(ctx, chunk)
+        if (sent?.message_id) lastSentMsgId = sent.message_id
       }
       await ctx.telegram.deleteMessage(ctx.chat.id, bg.transitionMsgId).catch(() => {})
     } else {
@@ -1118,21 +1274,34 @@ async function handleTask(ctx, forcedText) {
             ctx.chat.id, finalMsgId, undefined, chunks[0]
           ).catch(() => {})
         })
+        lastSentMsgId = finalMsgId
       } else {
-        await sendWithFallback(ctx, chunks[0])
+        const sent = await sendWithFallback(ctx, chunks[0])
+        if (sent?.message_id) lastSentMsgId = sent.message_id
       }
 
       for (let i = 1; i < chunks.length; i++) {
-        await sendWithFallback(ctx, chunks[i])
+        const sent = await sendWithFallback(ctx, chunks[i])
+        if (sent?.message_id) lastSentMsgId = sent.message_id
       }
     }
     sessionManager.clearBackgroundTask(userId)
 
     // ── TTS button (if enabled by user) ─────────────────────────────────────
+    logger.info(`[TTS] ttsButton=${session.ttsButton} for user ${userId}`)
     if (session.ttsButton) {
-      await ctx.reply('🔊', {
-        reply_markup: { inline_keyboard: [[{ text: '🔊 Escuchar', callback_data: 'tts_last' }]] },
-      }).catch(() => {})
+      logger.info(`[TTS] sending tts_last button for user ${userId}`)
+      const ttsKeyboard = { inline_keyboard: [[{ text: '🔊 Escuchar', callback_data: 'tts_last' }]] }
+      try {
+        if (lastSentMsgId) {
+          await ctx.telegram.editMessageReplyMarkup(ctx.chat.id, lastSentMsgId, undefined, ttsKeyboard)
+        } else {
+          await ctx.reply('🔊 Escuchar', { reply_markup: ttsKeyboard })
+        }
+        logger.info(`[TTS] tts_last button sent OK for user ${userId}`)
+      } catch (btnErr) {
+        logger.error(`[TTS] tts_last button FAILED for user ${userId}: ${btnErr.message}`)
+      }
     }
   } catch (err) {
     clearAllTimers()
@@ -1284,7 +1453,7 @@ async function handleVoice(ctx) {
   let heartbeatInterval = null
 
   try {
-    statusMsg = await ctx.reply('🎙️ Transcribiendo audio...')
+    statusMsg = await ctx.reply('🎙️ Transcribiendo...')
 
     const startTime = Date.now()
     heartbeatInterval = setInterval(async () => {
@@ -1292,7 +1461,7 @@ async function handleVoice(ctx) {
       if (statusMsg) {
         await ctx.telegram.editMessageText(
           ctx.chat.id, statusMsg.message_id, undefined,
-          `🎙️ Transcribiendo audio... (${elapsed}s)`
+          `🎙️ Transcribiendo... (${elapsed}s)`
         ).catch(() => {})
       }
     }, 10_000)
@@ -1301,19 +1470,38 @@ async function handleVoice(ctx) {
     clearInterval(heartbeatInterval)
     heartbeatInterval = null
 
-    await ctx.telegram.editMessageText(
-      ctx.chat.id, statusMsg.message_id, undefined,
-      `📝 Transcripción:\n${transcript}`
-    ).catch(() => {})
-    statusMsg = null
+    // Delete the status message — transcript passes internally, not shown to user
+    if (statusMsg) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {})
+      statusMsg = null
+    }
 
     const response = await dispatch(null, transcript, session)
     sessionManager.addToHistory(userId, 'user', transcript)
     sessionManager.addToHistory(userId, 'assistant', response)
+    sessionManager.setLastResponse(userId, response)
 
-    const chunks = splitMessage(response, MAX_RESPONSE_LENGTH)
-    for (const chunk of chunks) {
-      await sendWithFallback(ctx, chunk)
+    if (session.voiceMode) {
+      try {
+        await sendTtsAudio(ctx, response, getEffectiveVoice(userId))
+      } catch (ttsErr) {
+        logger.error(`TTS voiceMode (voice handler) failed for user ${userId}: ${ttsErr.message}`)
+        await ctx.reply('⚠️ TTS falló, mostrando texto:').catch(() => {})
+        const chunks = splitMessage(response, MAX_RESPONSE_LENGTH)
+        for (const chunk of chunks) await sendWithFallback(ctx, chunk)
+      }
+    } else {
+      const chunks = splitMessage(response, MAX_RESPONSE_LENGTH)
+      let lastSentMsgId = null
+      for (const chunk of chunks) {
+        const sent = await sendWithFallback(ctx, chunk)
+        if (sent?.message_id) lastSentMsgId = sent.message_id
+      }
+      // TTS button: attach inline keyboard to last message
+      if (session.ttsButton && lastSentMsgId) {
+        const ttsKeyboard = { inline_keyboard: [[{ text: '🔊 Escuchar', callback_data: 'tts_last' }]] }
+        await ctx.telegram.editMessageReplyMarkup(ctx.chat.id, lastSentMsgId, undefined, ttsKeyboard).catch(() => {})
+      }
     }
   } catch (err) {
     clearInterval(heartbeatInterval)
@@ -1418,9 +1606,9 @@ function splitMessage(text, maxLength) {
 
 async function sendWithFallback(ctx, text) {
   try {
-    await ctx.reply(text, { parse_mode: 'Markdown' })
+    return await ctx.reply(text, { parse_mode: 'Markdown' })
   } catch {
-    await ctx.reply(text)
+    return await ctx.reply(text)
   }
 }
 
@@ -1453,10 +1641,16 @@ module.exports = {
   // TTS
   handleVoiceMode,
   handleTtsButton,
-  handleVoz,
+  handleListen,
+  handleTtsVoice,
   handleTtsCallback,
   // Inline callbacks
+  handleNewAgentVoiceLangSelect,
+  handleNewAgentVoiceSelect,
   handleNewAgentCliSelect,
+  // TTS voice picker
+  handleTtsVoiceLangSelect,
+  handleTtsVoiceSelect,
   handleDelAgentConfirm,
   handleDelAgentCancel,
   handleEditAgentFieldSelect,

@@ -48,6 +48,8 @@ class SessionManager {
         autoMode: data.autoMode ?? false,
         voiceMode: data.voiceMode ?? false,
         ttsButton: data.ttsButton ?? false,
+        ttsGender: data.ttsGender ?? 'masc',
+        ttsVoice: data.ttsVoice ?? null,
         onboarding: null,
         backgroundTask: null,
         newAgentFlow: null,
@@ -74,6 +76,8 @@ class SessionManager {
       autoMode: session.autoMode ?? false,
       voiceMode: session.voiceMode ?? false,
       ttsButton: session.ttsButton ?? false,
+      ttsGender: session.ttsGender ?? 'masc',
+      ttsVoice: session.ttsVoice ?? null,
       savedAt: new Date().toISOString(),
     }, null, 2)
     try {
@@ -107,6 +111,8 @@ class SessionManager {
         autoMode: false,
         voiceMode: false,
         ttsButton: false,
+        ttsGender: 'masc',
+        ttsVoice: null,
         onboarding: null,
         backgroundTask: null,
         newAgentFlow: null,
@@ -352,6 +358,46 @@ class SessionManager {
    */
   getTtsButton(userId) {
     return this.getOrCreate(userId).ttsButton ?? false
+  }
+
+  /**
+   * Sets the TTS gender for a user and persists it to disk.
+   * @param {number|string} userId
+   * @param {'masc'|'fem'} gender
+   */
+  setTtsGender(userId, gender) {
+    const session = this.getOrCreate(userId)
+    session.ttsGender = gender === 'fem' ? 'fem' : 'masc'
+    this._saveToDisk(session)
+  }
+
+  /**
+   * Returns the TTS gender for a user.
+   * @param {number|string} userId
+   * @returns {'masc'|'fem'}
+   */
+  getTtsGender(userId) {
+    return this.getOrCreate(userId).ttsGender ?? 'masc'
+  }
+
+  /**
+   * Sets the full TTS voice name for a user and persists it to disk.
+   * @param {number|string} userId
+   * @param {string|null} voiceName  e.g. 'en-US-JennyNeural', or null to use gender default
+   */
+  setTtsVoice(userId, voiceName) {
+    const session = this.getOrCreate(userId)
+    session.ttsVoice = voiceName ?? null
+    this._saveToDisk(session)
+  }
+
+  /**
+   * Returns the full TTS voice name for a user, or null if using gender default.
+   * @param {number|string} userId
+   * @returns {string|null}
+   */
+  getTtsVoice(userId) {
+    return this.getOrCreate(userId).ttsVoice ?? null
   }
 
   /**
