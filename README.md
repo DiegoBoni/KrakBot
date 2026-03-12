@@ -56,26 +56,35 @@ npm start
 
 ## Variables de entorno
 
-| Variable              | Default   | Descripción                                                  |
-|-----------------------|-----------|--------------------------------------------------------------|
-| `TELEGRAM_TOKEN`      | —         | Token del bot desde @BotFather **(requerido)**               |
-| `DEFAULT_AGENT`       | `claude`  | Agente por defecto cuando no se especifica mención           |
-| `AUTHORIZED_USERS`    | (vacío)   | IDs de Telegram separados por coma; vacío = permitir a todos |
-| `CLI_TIMEOUT`         | `120000`  | Tiempo máximo en ms por respuesta del CLI                    |
-| `DEBUG`               | `false`   | Logs verbosos                                                |
-| `CLAUDE_CLI_PATH`     | `claude`  | Ruta o nombre del ejecutable de Claude Code                  |
-| `GEMINI_CLI_PATH`     | `gemini`  | Ruta o nombre del ejecutable de Gemini CLI                   |
-| `CODEX_CLI_PATH`      | `codex`   | Ruta o nombre del ejecutable de Codex CLI                    |
-| `CLAUDE_MODEL`        | —         | Modelo específico para Claude (ej: `claude-opus-4-5`)        |
-| `GEMINI_MODEL`        | —         | Modelo específico para Gemini                                |
-| `CODEX_MODEL`         | —         | Modelo específico para Codex                                 |
-| `MAX_RESPONSE_LENGTH` | `4000`    | Máximo de chars por mensaje antes de partir en chunks        |
-| `ROOT_AGENT_CLI`      | `claude`  | CLI que actúa como Root Agent para routing automático        |
-| `HISTORY_WINDOW`      | `6`       | Pares de mensajes a conservar en el historial de contexto    |
-| `SESSION_TTL_HOURS`   | `0`       | Horas de inactividad para expirar sesión (0 = nunca)         |
-| `MAX_FILE_SIZE_MB`    | `20`      | Tamaño máximo de archivo aceptado vía Telegram (en MB)       |
-| `TTS_ENGINE`          | `auto`    | Motor TTS: `auto` \| `edge-tts` \| `say`                    |
-| `TTS_VOICE`           | —         | Forzar una voz edge-tts específica (sobreescribe la sesión)  |
+| Variable                    | Default                            | Descripción                                                  |
+|-----------------------------|------------------------------------|--------------------------------------------------------------|
+| `TELEGRAM_TOKEN`            | —                                  | Token del bot desde @BotFather **(requerido)**               |
+| `DEFAULT_AGENT`             | `claude`                           | Agente por defecto cuando no se especifica mención           |
+| `AUTHORIZED_USERS`          | (vacío)                            | IDs de Telegram separados por coma; vacío = permitir a todos |
+| `DEBUG`                     | `false`                            | Logs verbosos                                                |
+| `CLAUDE_CLI_PATH`           | `claude`                           | Ruta o nombre del ejecutable de Claude Code                  |
+| `GEMINI_CLI_PATH`           | `gemini`                           | Ruta o nombre del ejecutable de Gemini CLI                   |
+| `CODEX_CLI_PATH`            | `codex`                            | Ruta o nombre del ejecutable de Codex CLI                    |
+| `CLAUDE_MODEL`              | —                                  | Modelo específico para Claude (ej: `claude-sonnet-4-6`)      |
+| `GEMINI_MODEL`              | —                                  | Modelo específico para Gemini                                |
+| `CODEX_MODEL`               | —                                  | Modelo específico para Codex                                 |
+| `MAX_RESPONSE_LENGTH`       | `4000`                             | Máximo de chars por mensaje antes de partir en chunks        |
+| `SOUL_PATH`                 | `./data/SOUL.md`                   | Ruta al archivo de soul (personalidad del bot)               |
+| `MEMORY_INJECT`             | `recent`                           | Modo de inyección de memorias: `recent` \| `all` \| `none`   |
+| `MEMORY_INJECT_LIMIT`       | `2000`                             | Máximo de chars de memorias a inyectar en el contexto        |
+| `HISTORY_WINDOW`            | `6`                                | Pares de mensajes a conservar en el historial de contexto    |
+| `SESSION_TTL_HOURS`         | `0`                                | Horas de inactividad para expirar sesión (0 = nunca)         |
+| `WHISPER_MODEL`             | `mlx-community/whisper-base-mlx`   | Modelo de Whisper para transcripción de audios               |
+| `WHISPER_LANGUAGE`          | `es`                               | Idioma para Whisper (`es`, `en`, etc.)                       |
+| `AUDIO_TEMP_DIR`            | `/tmp/krakbot-audio`               | Directorio temporal para archivos de audio                   |
+| `MAX_AUDIO_SIZE_MB`         | `25`                               | Tamaño máximo de audio aceptado (en MB)                      |
+| `ROOT_AGENT_CLI`            | `claude`                           | CLI que actúa como Root Agent para routing automático        |
+| `GITHUB_REPO`               | `DiegoBoni/KrakBot`                | Repo para auto-update (`owner/repo`, vacío = deshabilitado)  |
+| `GITHUB_BRANCH`             | `main`                             | Rama a monitorear para actualizaciones                       |
+| `UPDATE_CHECK_INTERVAL_HOURS` | `24`                             | Intervalo entre chequeos de actualización (0 = deshabilitado)|
+| `NOTIFY_CHAT_ID`            | —                                  | Chat ID para notificaciones (default: primer AUTHORIZED_USER)|
+| `GITHUB_TOKEN`              | —                                  | Token GitHub para repos privados (opcional en repos públicos)|
+| `PM2_APP_NAME`              | `krakbot`                          | Nombre de la app en PM2 para el restart automático           |
 
 ---
 
@@ -472,26 +481,35 @@ npm start
 
 ## Environment variables
 
-| Variable              | Default   | Description                                                        |
-|-----------------------|-----------|--------------------------------------------------------------------|
-| `TELEGRAM_TOKEN`      | —         | Bot token from @BotFather **(required)**                           |
-| `DEFAULT_AGENT`       | `claude`  | Default agent when no mention is specified                         |
-| `AUTHORIZED_USERS`    | (empty)   | Comma-separated Telegram user IDs; empty = allow everyone          |
-| `CLI_TIMEOUT`         | `120000`  | Max time in ms per CLI response                                    |
-| `DEBUG`               | `false`   | Verbose logging                                                    |
-| `CLAUDE_CLI_PATH`     | `claude`  | Path or name of the Claude Code executable                         |
-| `GEMINI_CLI_PATH`     | `gemini`  | Path or name of the Gemini CLI executable                          |
-| `CODEX_CLI_PATH`      | `codex`   | Path or name of the Codex CLI executable                           |
-| `CLAUDE_MODEL`        | —         | Specific model for Claude (e.g. `claude-opus-4-5`)                 |
-| `GEMINI_MODEL`        | —         | Specific model for Gemini                                          |
-| `CODEX_MODEL`         | —         | Specific model for Codex                                           |
-| `MAX_RESPONSE_LENGTH` | `4000`    | Max chars per message before splitting into chunks                 |
-| `ROOT_AGENT_CLI`      | `claude`  | CLI that acts as Root Agent for automatic routing                  |
-| `HISTORY_WINDOW`      | `6`       | Message pairs to keep in context history                           |
-| `SESSION_TTL_HOURS`   | `0`       | Inactivity hours before session expires (0 = never)                |
-| `MAX_FILE_SIZE_MB`    | `20`      | Max file size accepted via Telegram (in MB)                        |
-| `TTS_ENGINE`          | `auto`    | TTS engine: `auto` \| `edge-tts` \| `say`                         |
-| `TTS_VOICE`           | —         | Force a specific edge-tts voice (overrides session setting)        |
+| Variable                      | Default                            | Description                                                        |
+|-------------------------------|------------------------------------|--------------------------------------------------------------------|
+| `TELEGRAM_TOKEN`              | —                                  | Bot token from @BotFather **(required)**                           |
+| `DEFAULT_AGENT`               | `claude`                           | Default agent when no mention is specified                         |
+| `AUTHORIZED_USERS`            | (empty)                            | Comma-separated Telegram user IDs; empty = allow everyone          |
+| `DEBUG`                       | `false`                            | Verbose logging                                                    |
+| `CLAUDE_CLI_PATH`             | `claude`                           | Path or name of the Claude Code executable                         |
+| `GEMINI_CLI_PATH`             | `gemini`                           | Path or name of the Gemini CLI executable                          |
+| `CODEX_CLI_PATH`              | `codex`                            | Path or name of the Codex CLI executable                           |
+| `CLAUDE_MODEL`                | —                                  | Specific model for Claude (e.g. `claude-sonnet-4-6`)               |
+| `GEMINI_MODEL`                | —                                  | Specific model for Gemini                                          |
+| `CODEX_MODEL`                 | —                                  | Specific model for Codex                                           |
+| `MAX_RESPONSE_LENGTH`         | `4000`                             | Max chars per message before splitting into chunks                 |
+| `SOUL_PATH`                   | `./data/SOUL.md`                   | Path to the soul file (bot personality)                            |
+| `MEMORY_INJECT`               | `recent`                           | Memory injection mode: `recent` \| `all` \| `none`                 |
+| `MEMORY_INJECT_LIMIT`         | `2000`                             | Max chars of memories to inject into context                       |
+| `HISTORY_WINDOW`              | `6`                                | Message pairs to keep in context history                           |
+| `SESSION_TTL_HOURS`           | `0`                                | Inactivity hours before session expires (0 = never)                |
+| `WHISPER_MODEL`               | `mlx-community/whisper-base-mlx`   | Whisper model for audio transcription                              |
+| `WHISPER_LANGUAGE`            | `es`                               | Language hint for Whisper (`es`, `en`, etc.)                       |
+| `AUDIO_TEMP_DIR`              | `/tmp/krakbot-audio`               | Temp directory for audio files                                     |
+| `MAX_AUDIO_SIZE_MB`           | `25`                               | Max audio file size accepted (in MB)                               |
+| `ROOT_AGENT_CLI`              | `claude`                           | CLI that acts as Root Agent for automatic routing                  |
+| `GITHUB_REPO`                 | `DiegoBoni/KrakBot`                | Repo for auto-update (`owner/repo`, empty = disabled)              |
+| `GITHUB_BRANCH`               | `main`                             | Branch to monitor for updates                                      |
+| `UPDATE_CHECK_INTERVAL_HOURS` | `24`                               | Hours between update checks (0 = disabled)                         |
+| `NOTIFY_CHAT_ID`              | —                                  | Chat ID for notifications (default: first AUTHORIZED_USER)         |
+| `GITHUB_TOKEN`                | —                                  | GitHub token for private repos (optional for public repos)         |
+| `PM2_APP_NAME`                | `krakbot`                          | PM2 app name for automatic restart                                 |
 
 ---
 
