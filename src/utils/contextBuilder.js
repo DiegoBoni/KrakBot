@@ -45,17 +45,20 @@ async function build(prompt, session, options = {}) {
     ? `[INSTRUCCIONES DEL AGENTE]\n${options.inlineSystemPrompt}\n[/INSTRUCCIONES DEL AGENTE]`
     : ''
   const memoriesBlock = memoriesText ? `[MEMORIES]\n${memoriesText}\n[/MEMORIES]` : ''
+  const fileBlock     = options.fileContent
+    ? `[ARCHIVO: ${options.fileName ?? 'archivo'}]\n${options.fileContent}\n[/ARCHIVO]`
+    : ''
 
-  const blocks = [soulBlock, agentBlock, memoriesBlock, historyBlock].filter(Boolean)
+  const blocks = [soulBlock, agentBlock, memoriesBlock, historyBlock, fileBlock].filter(Boolean)
   const suffix = `---\nTarea: ${prompt}`
 
   let full = blocks.length > 0
     ? `${blocks.join('\n\n')}\n\n${suffix}`
     : prompt
 
-  // If over the hard limit, drop memories first, then trim soul
+  // If over the hard limit, drop memories first, then trim soul (fileBlock preserved)
   if (full.length > PROMPT_HARD_LIMIT) {
-    const blocksNoMemory = [soulBlock, agentBlock, historyBlock].filter(Boolean)
+    const blocksNoMemory = [soulBlock, agentBlock, historyBlock, fileBlock].filter(Boolean)
     full = blocksNoMemory.length > 0
       ? `${blocksNoMemory.join('\n\n')}\n\n${suffix}`
       : prompt
@@ -63,7 +66,7 @@ async function build(prompt, session, options = {}) {
     if (full.length > PROMPT_HARD_LIMIT) {
       const trimmedSoul = soul ? soul.slice(0, 1000) : ''
       const trimmedSoulBlock = trimmedSoul ? `[SOUL]\n${trimmedSoul}\n[/SOUL]` : ''
-      const blocksMinimal = [trimmedSoulBlock, agentBlock, historyBlock].filter(Boolean)
+      const blocksMinimal = [trimmedSoulBlock, agentBlock, historyBlock, fileBlock].filter(Boolean)
       full = blocksMinimal.length > 0
         ? `${blocksMinimal.join('\n\n')}\n\n${suffix}`
         : prompt

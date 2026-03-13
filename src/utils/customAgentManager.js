@@ -80,6 +80,8 @@ function create(def) {
     description: def.description,
     systemPrompt: def.systemPrompt,
     cli: def.cli,
+    ttsVoice: def.ttsVoice ?? null,
+    ttsGender: def.ttsGender === 'fem' ? 'fem' : 'masc',
     createdAt: new Date().toISOString(),
   }
 
