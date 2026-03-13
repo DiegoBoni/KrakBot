@@ -1066,9 +1066,16 @@ async function handleTask(ctx, forcedText) {
     if (pendingFile.fileType === 'text') {
       try {
         const ext = pendingFile.originalName.split('.').pop()?.toLowerCase()
-        const content = (ext === 'doc' || ext === 'docx')
-          ? await fileManager.readWordFile(pendingFile.localPath, 50_000)
-          : fileManager.readTextFile(pendingFile.localPath, 50_000)
+        let content
+        if (ext === 'doc' || ext === 'docx') {
+          content = await fileManager.readWordFile(pendingFile.localPath, 50_000)
+        } else if (ext === 'xls' || ext === 'xlsx') {
+          content = fileManager.readExcelFile(pendingFile.localPath, 50_000)
+        } else if (ext === 'ppt' || ext === 'pptx') {
+          content = await fileManager.readPptxFile(pendingFile.localPath, 50_000)
+        } else {
+          content = fileManager.readTextFile(pendingFile.localPath, 50_000)
+        }
         fileOpts = { fileContent: content, fileName: pendingFile.originalName }
       } catch (err) {
         logger.warn(`No se pudo leer el archivo ${pendingFile.originalName}: ${err.message}`)

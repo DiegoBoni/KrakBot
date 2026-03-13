@@ -7,6 +7,8 @@ const { rmSync } = require('fs')
 const { pipeline } = require('stream/promises')
 const { randomUUID } = require('crypto')
 const mammoth = require('mammoth')
+const XLSX    = require('xlsx')
+const JSZip   = require('jszip')
 
 // ─── Allowlists ───────────────────────────────────────────────────────────────
 
@@ -15,6 +17,8 @@ const ALLOWED_TEXT_EXTS = new Set([
   'java', 'go', 'rs', 'rb', 'php', 'sh', 'sql', 'yaml', 'yml',
   'json', 'toml', 'html', 'css', 'xml', 'ini', 'env', 'conf',
   'doc', 'docx',
+  'xls', 'xlsx',
+  'ppt', 'pptx',
 ])
 
 const ALLOWED_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif'])
@@ -135,6 +139,76 @@ async function readWordFile(localPath, maxChars = MAX_TEXT_CHARS) {
   return content
 }
 
+/**
+ * Extract text from .xlsx or .xls using SheetJS.
+ * Each sheet becomes a labeled CSV block.
+ * @param {string} localPath
+ * @param {number} maxChars
+ * @returns {string}
+ */
+function readExcelFile(localPath, maxChars = MAX_TEXT_CHARS) {
+  const workbook = XLSX.readFile(localPath)
+  const parts = []
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName]
+    const csv = XLSX.utils.sheet_to_csv(sheet, { blankrows: false })
+    if (csv.trim()) parts.push(`### Hoja: ${sheetName}\n${csv}`)
+  }
+  let content = parts.join('\n\n')
+  if (content.length > maxChars) {
+    content = content.slice(0, maxChars) +
+      `\n\n[... archivo truncado a ${maxChars.toLocaleString()} caracteres ...]`
+  }
+  return content
+}
+
+/**
+ * Extract text from .pptx by reading slide XMLs inside the zip.
+ * Falls back to best-effort for .ppt (old binary format).
+ * @param {string} localPath
+ * @param {number} maxChars
+ * @returns {Promise<string>}
+ */
+async function readPptxFile(localPath, maxChars = MAX_TEXT_CHARS) {
+  const ext = path.extname(localPath).toLowerCase()
+  let content
+
+  if (ext === '.pptx') {
+    const buffer = readFileSync(localPath)
+    const zip = await JSZip.loadAsync(buffer)
+    const slideFiles = Object.keys(zip.files)
+      .filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+      .sort((a, b) => {
+        const na = parseInt(a.match(/\d+/)[0])
+        const nb = parseInt(b.match(/\d+/)[0])
+        return na - nb
+      })
+
+    const parts = []
+    for (let i = 0; i < slideFiles.length; i++) {
+      const xml = await zip.files[slideFiles[i]].async('string')
+      // Extract text nodes from XML, strip all tags
+      const text = xml
+        .replace(/<a:t[^>]*>(.*?)<\/a:t>/gs, '$1 ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+        .replace(/\s+/g, ' ').trim()
+      if (text) parts.push(`### Slide ${i + 1}\n${text}`)
+    }
+    content = parts.join('\n\n')
+  } else {
+    // .ppt binary — best-effort ASCII extraction
+    const raw = readFileSync(localPath, 'latin1')
+    content = raw.replace(/[^\x20-\x7E\n\r\t\xC0-\xFF]/g, ' ').replace(/ {3,}/g, ' ').trim()
+  }
+
+  if (content.length > maxChars) {
+    content = content.slice(0, maxChars) +
+      `\n\n[... archivo truncado a ${maxChars.toLocaleString()} caracteres ...]`
+  }
+  return content
+}
+
 // ─── Cleanup ──────────────────────────────────────────────────────────────────
 
 /** Delete a single file silently (no-op if already deleted). */
@@ -197,6 +271,8 @@ function fileEmoji(originalName) {
   if (ext === 'pdf') return '📄'
   if (ext === 'csv') return '📊'
   if (ext === 'doc' || ext === 'docx') return '📝'
+  if (ext === 'xls' || ext === 'xlsx') return '📊'
+  if (ext === 'ppt' || ext === 'pptx') return '📑'
   if (ALLOWED_IMAGE_EXTS.has(ext)) return '🖼️'
   return '📎'
 }
@@ -209,6 +285,8 @@ module.exports = {
   downloadTelegramFile,
   readTextFile,
   readWordFile,
+  readExcelFile,
+  readPptxFile,
   cleanupFile,
   cleanupUserUploads,
   cleanupExpiredUploads,
