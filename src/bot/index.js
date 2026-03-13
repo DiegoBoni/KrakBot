@@ -46,6 +46,21 @@ const {
   handleEditAgentFieldSelect,
   handleEditAgentCliValSelect,
   handleEditAgentCancel,
+  // Teams
+  handleBuildTeam,
+  handleListTeams,
+  handleDelTeam,
+  handleEditTeam,
+  // Tasks
+  handleCreateTask,
+  handleListTasks,
+  handleTaskStatus,
+  handleCancelTask,
+  handleTeamStatus,
+  // Team callbacks + feedback
+  handleTeamCallback,
+  handlePendingReviewFeedback,
+  handleTextIfActive,
 } = require('./handlers')
 const logger = require('../utils/logger')
 
@@ -123,6 +138,17 @@ function createBot() {
   bot.command('ttsbutton', handleTtsButton)
   bot.command(['listen', 'voz'], handleListen)
   bot.command('ttsvoice',  handleTtsVoice)
+
+  // Team commands
+  bot.command('buildteam',   handleBuildTeam)
+  bot.command('teams',       handleListTeams)
+  bot.command('delteam',     handleDelTeam)
+  bot.command('editteam',    handleEditTeam)
+  bot.command('task',        handleCreateTask)
+  bot.command('tasks',       handleListTasks)
+  bot.command('taskstatus',  handleTaskStatus)
+  bot.command('canceltask',  handleCancelTask)
+  bot.command('teamstatus',  handleTeamStatus)
 
   // ─── Inline keyboard actions ───────────────────────────────────────────────
 
@@ -217,11 +243,26 @@ function createBot() {
     await handleSetAgent(ctx, `custom:${ctx.match[1]}`)
   })
 
+  // Team workflow callbacks (catch-all for team_* and buildteam_* prefixes)
+  bot.action(/^(team_|buildteam_|autoroute_team:)/, async (ctx) => {
+    const data = ctx.callbackQuery?.data ?? ''
+    const handled = await handleTeamCallback(ctx, data).catch(err => {
+      logger.error(`handleTeamCallback error: ${err.message}`)
+      return false
+    })
+    if (!handled) await ctx.answerCbQuery().catch(() => {})
+  })
+
   // ─── Text messages → task dispatch ────────────────────────────────────────
   // Fire-and-forget: return immediately so Telegraf's polling loop can fetch
   // the next update without waiting for the (potentially 30-min) AI handler.
   bot.on('text', (ctx) => {
-    handleTask(ctx).catch((err) => {
+    async function dispatch() {
+      if (await handlePendingReviewFeedback(ctx)) return
+      if (await handleTextIfActive(ctx)) return
+      await handleTask(ctx)
+    }
+    dispatch().catch((err) => {
       logger.error(`Unhandled task error: ${err.message}`)
       ctx.reply('❌ Error inesperado.').catch(() => {})
     })

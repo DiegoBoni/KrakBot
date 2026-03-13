@@ -167,15 +167,31 @@ async function runCustomAgent(customDef, prompt, session, signal, onChunk, fileO
  */
 async function routeWithRootAgent(prompt, session) {
   const agents = customAgentManager.list()
-  if (agents.length === 0) return null
+  // Lazy-load teamManager to avoid circular deps at module load time
+  let teams = []
+  try { teams = require('../utils/teamManager').list() } catch { /* not yet initialized */ }
 
-  const agentList = agents.map(a => `${a.id} — ${a.description}`).join('\n')
-  const metaPrompt =
-    `Tenés estas herramientas disponibles (nombre: descripción):\n${agentList}\n\n` +
-    `Tarea del usuario: "${prompt}"\n\n` +
-    `Respondé ÚNICAMENTE con el ID del agente más adecuado para esta tarea.\n` +
-    `Si ninguno aplica claramente, respondé: none\n` +
-    `No agregues explicación. Solo el ID o "none".`
+  if (agents.length === 0 && teams.length === 0) return null
+
+  const agentLines = agents.map(a => `${a.id} — ${a.description}`).join('\n')
+  const teamLines  = teams.map(t => `${t.id} — ${t.description} (equipo: ${t.workers.length + 1} agentes)`).join('\n')
+
+  let metaPrompt = `Tarea del usuario: "${prompt}"\n\n`
+
+  if (agents.length > 0) {
+    metaPrompt += `AGENTES INDIVIDUALES (rápidos, tarea específica):\n${agentLines}\n\n`
+  }
+  if (teams.length > 0) {
+    metaPrompt += `EQUIPOS (complejos, multi-agente, múltiples pasos):\n${teamLines}\n\n`
+  }
+
+  metaPrompt +=
+    `Analizá la tarea y respondé ÚNICAMENTE con una de estas opciones:\n` +
+    `- El ID del agente individual más adecuado\n` +
+    `- El ID del equipo más adecuado (si la tarea es compleja o multi-paso)\n` +
+    `- "ambos: agent-id, team-id" si AMBOS aplican igualmente bien\n` +
+    `- "none" si ninguno aplica claramente\n` +
+    `Sin explicación. Solo el ID, "ambos: x, y", o "none".`
 
   const rootCliKey = process.env.ROOT_AGENT_CLI || 'claude'
   const base = AGENTS[rootCliKey] ?? AGENTS.claude
@@ -186,16 +202,63 @@ async function routeWithRootAgent(prompt, session) {
       undefined,
       undefined
     )
-    const id = result.trim().split(/\s+/)[0].toLowerCase()
-    if (!id || id === 'none') return null
-    if (!customAgentManager.get(id)) {
-      logger.warn(`routeWithRootAgent: unknown ID returned: "${id}"`)
-      return null
+    const raw = result.trim().split(/\n/)[0].trim().toLowerCase()
+    if (!raw || raw === 'none') return null
+
+    // Handle "ambos: agent-id, team-id"
+    if (raw.startsWith('ambos:')) {
+      const parts = raw.replace('ambos:', '').split(',').map(s => s.trim()).filter(Boolean)
+      if (parts.length >= 2) return { type: 'ambos', agentId: parts[0], teamId: parts[1] }
     }
-    return id
+
+    // Single ID — check if it's a team or an agent
+    const id = raw.split(/\s+/)[0]
+    if (teams.some(t => t.id === id)) return { type: 'team', teamId: id }
+    if (customAgentManager.get(id)) return id  // backward compat: return string for single agent
+    logger.warn(`routeWithRootAgent: unknown ID returned: "${id}"`)
+    return null
   } catch (err) {
     logger.warn(`routeWithRootAgent: routing call failed — ${err.message}`)
     return null
+  }
+}
+
+// ─── Role-based dispatch (for team workflows) ──────────────────────────────────
+
+/**
+ * Invokes a custom agent with a structured role prompt, overriding its systemPrompt.
+ * Used by teamWorkflow for coordinator / worker / reviewer steps.
+ * Returns the full text response (no streaming — workflow steps don't need live updates).
+ *
+ * @param {string}      agentId    Custom agent ID (without 'custom:' prefix)
+ * @param {string}      rolePrompt The role-specific system prompt for this step
+ * @param {AbortSignal} signal
+ * @returns {Promise<string>}
+ */
+async function dispatchWithRole(agentId, rolePrompt, signal) {
+  const def = customAgentManager.get(agentId)
+  if (!def) throw new Error(`dispatchWithRole: agente "${agentId}" no encontrado`)
+
+  const base = AGENTS[def.cli] ?? AGENTS.claude
+
+  logger.info(`dispatchWithRole → ${agentId} (${def.cli}) prompt="${rolePrompt.slice(0, 60)}..."`)
+
+  // rolePrompt contains both the role context and the task — pass as the user message.
+  // No session history, no SOUL injection — pure role execution.
+  if (def.cli === 'claude') {
+    const flags = [
+      base.cli,
+      base.printFlag,
+      '--dangerously-skip-permissions',
+      '--no-session-persistence',
+      '--disable-slash-commands',
+      ...(process.env.CLAUDE_MODEL ? ['--model', process.env.CLAUDE_MODEL] : []),
+      rolePrompt,
+    ]
+    return runCLI(flags, undefined, signal)
+  } else {
+    const flags = [base.cli, base.printFlag, ...(base.extraFlags ?? []), rolePrompt]
+    return runCLI(flags, undefined, signal)
   }
 }
 
@@ -264,4 +327,4 @@ async function dispatchStreaming(agentKey, prompt, session, signal, onChunk, fil
   return agentModule.run(prompt, session, signal, fileOpts)
 }
 
-module.exports = { AGENTS, dispatch, dispatchStreaming, resolveAgent, getAgentInfo, listAgents, routeWithRootAgent }
+module.exports = { AGENTS, dispatch, dispatchStreaming, dispatchWithRole, resolveAgent, getAgentInfo, listAgents, routeWithRootAgent }
