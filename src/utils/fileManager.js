@@ -6,6 +6,7 @@ const { readFileSync } = require('fs')
 const { rmSync } = require('fs')
 const { pipeline } = require('stream/promises')
 const { randomUUID } = require('crypto')
+const mammoth = require('mammoth')
 
 // ─── Allowlists ───────────────────────────────────────────────────────────────
 
@@ -13,6 +14,7 @@ const ALLOWED_TEXT_EXTS = new Set([
   'txt', 'md', 'csv', 'log', 'py', 'js', 'ts', 'jsx', 'tsx',
   'java', 'go', 'rs', 'rb', 'php', 'sh', 'sql', 'yaml', 'yml',
   'json', 'toml', 'html', 'css', 'xml', 'ini', 'env', 'conf',
+  'doc', 'docx',
 ])
 
 const ALLOWED_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif'])
@@ -106,6 +108,33 @@ function readTextFile(localPath, maxChars = MAX_TEXT_CHARS) {
   return content
 }
 
+/**
+ * Extract plain text from a .docx (or .doc) file using mammoth.
+ * Falls back to raw utf-8 read for .doc (older binary format, best-effort).
+ * @param {string} localPath
+ * @param {number} maxChars
+ * @returns {Promise<string>}
+ */
+async function readWordFile(localPath, maxChars = MAX_TEXT_CHARS) {
+  const ext = path.extname(localPath).toLowerCase()
+  let content
+
+  if (ext === '.docx') {
+    const result = await mammoth.extractRawText({ path: localPath })
+    content = result.value ?? ''
+  } else {
+    // .doc — best-effort: extract readable ASCII strings from binary
+    const raw = readFileSync(localPath, 'latin1')
+    content = raw.replace(/[^\x20-\x7E\n\r\t\xC0-\xFF]/g, ' ').replace(/ {3,}/g, ' ').trim()
+  }
+
+  if (content.length > maxChars) {
+    return content.slice(0, maxChars) +
+      `\n\n[... archivo truncado a ${maxChars.toLocaleString()} caracteres ...]`
+  }
+  return content
+}
+
 // ─── Cleanup ──────────────────────────────────────────────────────────────────
 
 /** Delete a single file silently (no-op if already deleted). */
@@ -167,6 +196,7 @@ function fileEmoji(originalName) {
   if (codeExts.has(ext)) return '💻'
   if (ext === 'pdf') return '📄'
   if (ext === 'csv') return '📊'
+  if (ext === 'doc' || ext === 'docx') return '📝'
   if (ALLOWED_IMAGE_EXTS.has(ext)) return '🖼️'
   return '📎'
 }
@@ -178,6 +208,7 @@ module.exports = {
   getMaxFileSizeBytes,
   downloadTelegramFile,
   readTextFile,
+  readWordFile,
   cleanupFile,
   cleanupUserUploads,
   cleanupExpiredUploads,

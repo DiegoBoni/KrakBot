@@ -1065,7 +1065,10 @@ async function handleTask(ctx, forcedText) {
 
     if (pendingFile.fileType === 'text') {
       try {
-        const content = fileManager.readTextFile(pendingFile.localPath, 50_000)
+        const ext = pendingFile.originalName.split('.').pop()?.toLowerCase()
+        const content = (ext === 'doc' || ext === 'docx')
+          ? await fileManager.readWordFile(pendingFile.localPath, 50_000)
+          : fileManager.readTextFile(pendingFile.localPath, 50_000)
         fileOpts = { fileContent: content, fileName: pendingFile.originalName }
       } catch (err) {
         logger.warn(`No se pudo leer el archivo ${pendingFile.originalName}: ${err.message}`)
