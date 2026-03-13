@@ -160,6 +160,7 @@ function maskToken(token) {
 function writeEnv(config) {
   const ts = new Date().toISOString().slice(0, 16).replace('T', ' ')
   const audioBlock = config.includeAudio ? `
+# Audio transcription (mlx-whisper)
 WHISPER_MODEL=${config.whisperModel || 'mlx-community/whisper-base-mlx'}
 WHISPER_LANGUAGE=${config.whisperLanguage || 'es'}
 AUDIO_TEMP_DIR=/tmp/krakbot-audio
@@ -174,16 +175,38 @@ AUTHORIZED_USERS=${config.authorizedUsers || ''}
 
 DEBUG=${config.debug || false}
 
+CLI_TIMEOUT=120000
+
 CLAUDE_CLI_PATH=claude
 GEMINI_CLI_PATH=gemini
 CODEX_CLI_PATH=codex
 
 CLAUDE_MODEL=${config.claudeModel || 'claude-sonnet-4-6'}
 GEMINI_MODEL=${config.geminiModel || 'gemini-2.5-pro'}
-CODEX_MODEL=${config.codexModel || 'gpt-5.2-codex'}
+CODEX_MODEL=${config.codexModel || ''}
 
 MAX_RESPONSE_LENGTH=4000
-${audioBlock}`
+
+# Personalization — soul & memories
+SOUL_PATH=./data/SOUL.md
+MEMORY_INJECT=recent
+MEMORY_INJECT_LIMIT=2000
+
+# Conversational memory
+HISTORY_WINDOW=6
+SESSION_TTL_HOURS=0
+${audioBlock}
+# Auto-update desde GitHub
+GITHUB_REPO=DiegoBoni/KrakBot
+GITHUB_BRANCH=main
+UPDATE_CHECK_INTERVAL_HOURS=24
+NOTIFY_CHAT_ID=
+GITHUB_TOKEN=
+PM2_APP_NAME=krakbot
+
+# Custom Agents
+ROOT_AGENT_CLI=claude
+`
 }
 
 // ─── JSON response helper ─────────────────────────────────────────────────────
@@ -385,8 +408,20 @@ async function router(req, res, port) {
     await spawnAndStream(res, 'pm2', ['delete', 'krakbot'], PROJECT_ROOT, { silent: true })
 
     // 3. Fresh start (always clean)
+    // --restart-delay 40000: wait 40s before restart so Telegram releases the previous polling session
     res.write('data: 🚀 Iniciando KrakBot con pm2...\n\n')
-    await spawnAndStream(res, 'pm2', ['start', 'npm', '--name', 'krakbot', '--', 'start'], PROJECT_ROOT)
+<<<<<<< Updated upstream
+    await spawnAndStream(res, 'pm2', ['start', 'npm', '--name', 'krakbot', '--restart-delay', '40000', '--', 'start'], PROJECT_ROOT)
+
+    res.write('data: 💾 Guardando estado de pm2...\n\n')
+=======
+    // Usamos el script directamente en lugar de 'npm start' para más estabilidad
+    // --restart-delay 40000: espera 40s para reiniciar y evitar conflictos con Telegram
+    await spawnAndStream(res, 'pm2', ['start', 'src/index.js', '--name', 'krakbot', '--restart-delay', '40000'], PROJECT_ROOT)
+
+    res.write('data: 💾 Guardando estado para que pm2 lo recuerde...\n\n')
+>>>>>>> Stashed changes
+    await spawnAndStream(res, 'pm2', ['save'], PROJECT_ROOT, { silent: true })
 
     res.write('data: __DONE__\n\n')
     res.end()

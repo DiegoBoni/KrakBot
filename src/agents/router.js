@@ -122,17 +122,12 @@ function listAgents() {
  * @param {Function|null} onChunk    Streaming callback, or null for non-streaming
  * @returns {Promise<string>}
  */
-async function runCustomAgent(customDef, prompt, session, signal, onChunk, fileOpts = {}) {
+async function runCustomAgent(customDef, prompt, session, signal, onChunk) {
   const base = AGENTS[customDef.cli]
   if (!base) throw new Error(`CLI del agente "${customDef.cli}" no está configurado`)
 
   if (customDef.cli === 'claude') {
-    // Binary files (images/PDFs) via @path; text files via fileContent in contextBuilder
-    const effectivePrompt = fileOpts.filePath ? `@${fileOpts.filePath}\n${prompt}` : prompt
-    const fullPrompt = await contextBuilder.build(effectivePrompt, session, {
-      fileContent: fileOpts.fileContent,
-      fileName: fileOpts.fileName,
-    })
+    const fullPrompt = await contextBuilder.build(prompt, session)
     const flags = [
       base.cli,
       base.printFlag,
@@ -143,11 +138,8 @@ async function runCustomAgent(customDef, prompt, session, signal, onChunk, fileO
     if (onChunk) return runCLIStreaming(flags, undefined, signal, onChunk)
     return runCLI(flags, undefined, signal)
   } else {
-    // Gemini/Codex: only text files supported (binary files rejected before reaching here)
     const fullPrompt = await contextBuilder.build(prompt, session, {
       inlineSystemPrompt: customDef.systemPrompt,
-      fileContent: fileOpts.fileContent,
-      fileName: fileOpts.fileName,
     })
     const flags = [base.cli, base.printFlag, ...(base.extraFlags ?? []), fullPrompt]
     if (onChunk) return runCLIStreaming(flags, undefined, signal, onChunk)
@@ -211,7 +203,7 @@ async function routeWithRootAgent(prompt, session) {
  * @param {AbortSignal} signal
  * @returns {Promise<string>}
  */
-async function dispatch(agentKey, prompt, session, signal, fileOpts = {}) {
+async function dispatch(agentKey, prompt, session, signal) {
   const key = agentKey || session.agent
 
   if (key.startsWith('custom:')) {
@@ -219,7 +211,7 @@ async function dispatch(agentKey, prompt, session, signal, fileOpts = {}) {
     const def = customAgentManager.get(id)
     if (!def) throw new Error(`Agente custom no encontrado: "${id}"`)
     logger.info(`Dispatching to custom:${id} (${def.cli}) | user=${session.userId} | prompt="${prompt.slice(0, 60)}..."`)
-    return runCustomAgent(def, prompt, session, signal, null, fileOpts)
+    return runCustomAgent(def, prompt, session, signal, null)
   }
 
   const agent = getAgentInfo(key)
@@ -227,7 +219,7 @@ async function dispatch(agentKey, prompt, session, signal, fileOpts = {}) {
 
   logger.info(`Dispatching to ${agent.name} | user=${session.userId} | prompt="${prompt.slice(0, 60)}..."`)
   const agentModule = require(`./${key}`)
-  return agentModule.run(prompt, session, signal, fileOpts)
+  return agentModule.run(prompt, session, signal)
 }
 
 /**
@@ -239,10 +231,9 @@ async function dispatch(agentKey, prompt, session, signal, fileOpts = {}) {
  * @param {object}    session   Session object from sessionManager
  * @param {AbortSignal} signal  Optional cancellation signal
  * @param {Function}  onChunk   Called with each stdout text chunk
- * @param {object}    fileOpts  Optional file attachment: { filePath?, fileContent?, fileName? }
  * @returns {Promise<string>}   Full stdout when done
  */
-async function dispatchStreaming(agentKey, prompt, session, signal, onChunk, fileOpts = {}) {
+async function dispatchStreaming(agentKey, prompt, session, signal, onChunk) {
   const key = agentKey || session.agent
 
   if (key.startsWith('custom:')) {
@@ -250,7 +241,7 @@ async function dispatchStreaming(agentKey, prompt, session, signal, onChunk, fil
     const def = customAgentManager.get(id)
     if (!def) throw new Error(`Agente custom no encontrado: "${id}"`)
     logger.info(`Streaming dispatch to custom:${id} (${def.cli}) | user=${session.userId} | prompt="${prompt.slice(0, 60)}..."`)
-    return runCustomAgent(def, prompt, session, signal, onChunk, fileOpts)
+    return runCustomAgent(def, prompt, session, signal, onChunk)
   }
 
   const agent = getAgentInfo(key)
@@ -259,9 +250,9 @@ async function dispatchStreaming(agentKey, prompt, session, signal, onChunk, fil
   logger.info(`Streaming dispatch to ${agent.name} | user=${session.userId} | prompt="${prompt.slice(0, 60)}..."`)
   const agentModule = require(`./${key}`)
   if (typeof agentModule.runStreaming === 'function') {
-    return agentModule.runStreaming(prompt, session, signal, onChunk, fileOpts)
+    return agentModule.runStreaming(prompt, session, signal, onChunk)
   }
-  return agentModule.run(prompt, session, signal, fileOpts)
+  return agentModule.run(prompt, session, signal)
 }
 
 module.exports = { AGENTS, dispatch, dispatchStreaming, resolveAgent, getAgentInfo, listAgents, routeWithRootAgent }

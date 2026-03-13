@@ -46,16 +46,10 @@ class SessionManager {
         lastActivity: Date.now(),
         taskCount: data.taskCount ?? 0,
         autoMode: data.autoMode ?? false,
-        voiceMode: data.voiceMode ?? false,
-        ttsButton: data.ttsButton ?? false,
-        ttsGender: data.ttsGender ?? 'masc',
-        ttsVoice: data.ttsVoice ?? null,
         onboarding: null,
         backgroundTask: null,
         newAgentFlow: null,
         editAgentFlow: null,
-        pendingFile: null,
-        lastResponse: null,
       }
     } catch (err) {
       if (err.code !== 'ENOENT') {
@@ -74,10 +68,6 @@ class SessionManager {
       history: session.history,
       taskCount: session.taskCount,
       autoMode: session.autoMode ?? false,
-      voiceMode: session.voiceMode ?? false,
-      ttsButton: session.ttsButton ?? false,
-      ttsGender: session.ttsGender ?? 'masc',
-      ttsVoice: session.ttsVoice ?? null,
       savedAt: new Date().toISOString(),
     }, null, 2)
     try {
@@ -109,16 +99,10 @@ class SessionManager {
         lastActivity: Date.now(),
         taskCount: 0,
         autoMode: false,
-        voiceMode: false,
-        ttsButton: false,
-        ttsGender: 'masc',
-        ttsVoice: null,
         onboarding: null,
         backgroundTask: null,
         newAgentFlow: null,
         editAgentFlow: null,
-        pendingFile: null,
-        lastResponse: null,
       }
       this._sessions.set(key, session)
       logger.debug(`Session created for user ${userId} (agent: ${session.agent})`)
@@ -289,134 +273,6 @@ class SessionManager {
    */
   getAutoMode(userId) {
     return this.getOrCreate(userId).autoMode ?? false
-  }
-
-  /**
-   * Stores a pending file attachment for a user (in-memory only, never persisted).
-   * @param {number|string} userId
-   * @param {{ localPath, originalName, fileType, size, savedAt }} fileInfo
-   */
-  setPendingFile(userId, fileInfo) {
-    const session = this.getOrCreate(userId)
-    session.pendingFile = fileInfo
-  }
-
-  /**
-   * Returns the pending file attachment for a user, or null.
-   * @param {number|string} userId
-   * @returns {object|null}
-   */
-  getPendingFile(userId) {
-    const session = this.getOrCreate(userId)
-    return session.pendingFile ?? null
-  }
-
-  /**
-   * Clears the pending file attachment for a user.
-   * @param {number|string} userId
-   */
-  clearPendingFile(userId) {
-    const session = this.getOrCreate(userId)
-    session.pendingFile = null
-  }
-
-  /**
-   * Sets the voiceMode flag for a user and persists it to disk.
-   * @param {number|string} userId
-   * @param {boolean} enabled
-   */
-  setVoiceMode(userId, enabled) {
-    const session = this.getOrCreate(userId)
-    session.voiceMode = !!enabled
-    this._saveToDisk(session)
-  }
-
-  /**
-   * Returns the voiceMode flag for a user.
-   * @param {number|string} userId
-   * @returns {boolean}
-   */
-  getVoiceMode(userId) {
-    return this.getOrCreate(userId).voiceMode ?? false
-  }
-
-  /**
-   * Sets the ttsButton flag for a user and persists it to disk.
-   * @param {number|string} userId
-   * @param {boolean} enabled
-   */
-  setTtsButton(userId, enabled) {
-    const session = this.getOrCreate(userId)
-    session.ttsButton = !!enabled
-    this._saveToDisk(session)
-  }
-
-  /**
-   * Returns the ttsButton flag for a user.
-   * @param {number|string} userId
-   * @returns {boolean}
-   */
-  getTtsButton(userId) {
-    return this.getOrCreate(userId).ttsButton ?? false
-  }
-
-  /**
-   * Sets the TTS gender for a user and persists it to disk.
-   * @param {number|string} userId
-   * @param {'masc'|'fem'} gender
-   */
-  setTtsGender(userId, gender) {
-    const session = this.getOrCreate(userId)
-    session.ttsGender = gender === 'fem' ? 'fem' : 'masc'
-    this._saveToDisk(session)
-  }
-
-  /**
-   * Returns the TTS gender for a user.
-   * @param {number|string} userId
-   * @returns {'masc'|'fem'}
-   */
-  getTtsGender(userId) {
-    return this.getOrCreate(userId).ttsGender ?? 'masc'
-  }
-
-  /**
-   * Sets the full TTS voice name for a user and persists it to disk.
-   * @param {number|string} userId
-   * @param {string|null} voiceName  e.g. 'en-US-JennyNeural', or null to use gender default
-   */
-  setTtsVoice(userId, voiceName) {
-    const session = this.getOrCreate(userId)
-    session.ttsVoice = voiceName ?? null
-    this._saveToDisk(session)
-  }
-
-  /**
-   * Returns the full TTS voice name for a user, or null if using gender default.
-   * @param {number|string} userId
-   * @returns {string|null}
-   */
-  getTtsVoice(userId) {
-    return this.getOrCreate(userId).ttsVoice ?? null
-  }
-
-  /**
-   * Stores the last text response for a user (in-memory only, never persisted).
-   * @param {number|string} userId
-   * @param {string} text
-   */
-  setLastResponse(userId, text) {
-    const session = this.getOrCreate(userId)
-    session.lastResponse = text ?? null
-  }
-
-  /**
-   * Returns the last text response for a user, or null.
-   * @param {number|string} userId
-   * @returns {string|null}
-   */
-  getLastResponse(userId) {
-    return this.getOrCreate(userId).lastResponse ?? null
   }
 
   /**

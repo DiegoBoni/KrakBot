@@ -10,8 +10,6 @@ const { AGENTS } = require('./agents/router')
 const { ensureTempDir, checkWhisper } = require('./utils/audioTranscriber')
 const updateChecker = require('./utils/updateChecker')
 const customAgentManager = require('./utils/customAgentManager')
-const fileManager = require('./utils/fileManager')
-const ttsService = require('./utils/ttsService')
 
 async function main() {
   logger.info('🚀 Telegram AI Gateway arrancando...')
@@ -23,15 +21,6 @@ async function main() {
     logger.debug(`Sessions dir ready: ${sessionsDir}`)
   } catch (err) {
     logger.error(`No se pudo crear data/sessions/: ${err.message}`)
-  }
-
-  // Ensure uploads directory exists (non-fatal).
-  const uploadsDir = path.resolve(__dirname, '../data/uploads')
-  try {
-    mkdirSync(uploadsDir, { recursive: true })
-    logger.debug(`Uploads dir ready: ${uploadsDir}`)
-  } catch (err) {
-    logger.warn(`No se pudo crear data/uploads/: ${err.message}`)
   }
 
   // Initialize custom agent store (creates data/custom-agents.json if needed)
@@ -50,24 +39,14 @@ async function main() {
     logger.warn('mlx_whisper no encontrado — transcripción de audio no disponible')
   }
 
-  // Check TTS availability
-  const ttsStatus = await ttsService.checkTTS()
-  if (ttsStatus.engine) {
-    logger.info(`🔊 TTS disponible: ${ttsStatus.engine} (voz: ${ttsStatus.voice})`)
-  } else {
-    logger.warn('TTS no disponible — ni edge-tts ni say encontrados')
-  }
-  global.__ttsEngine = ttsStatus.engine ?? null
-
   const bot = createBot()
 
   // Init auto-updater with bot instance (must happen before bot.launch)
   updateChecker.init(bot)
 
-  // Periodic cleanup of stale sessions and expired uploads (every hour)
-  const cleanupInterval = setInterval(async () => {
+  // Periodic cleanup of stale sessions (every hour)
+  const cleanupInterval = setInterval(() => {
     sessionManager.cleanup()
-    await fileManager.cleanupExpiredUploads()
     logger.debug(`Active sessions: ${sessionManager.size}`)
   }, 60 * 60 * 1000)
 
@@ -82,9 +61,23 @@ async function main() {
   process.once('SIGINT',  () => shutdown('SIGINT'))
   process.once('SIGTERM', () => shutdown('SIGTERM'))
 
-  await bot.launch({
-    dropPendingUpdates: true,
-  })
+  // Retry on 409 Conflict: Telegram holds the previous long-polling session open for ~30s
+  // after the process dies. First wait is 35s to outlast that window; subsequent waits shorter.
+  const LAUNCH_RETRIES = 4
+  for (let attempt = 1; attempt <= LAUNCH_RETRIES; attempt++) {
+    try {
+      await bot.launch({ dropPendingUpdates: true })
+      break
+    } catch (err) {
+      if (err.message && err.message.includes('409') && attempt < LAUNCH_RETRIES) {
+        const delay = attempt === 1 ? 35000 : 10000
+        logger.warn(`bot.launch() 409 Conflict — reintentando en ${delay / 1000}s (intento ${attempt}/${LAUNCH_RETRIES})`)
+        await new Promise(resolve => setTimeout(resolve, delay))
+      } else {
+        throw err
+      }
+    }
+  }
 
   // Register the "/" command menu visible in Telegram clients
   await bot.telegram.setMyCommands([
@@ -104,10 +97,7 @@ async function main() {
     { command: 'limpiar',   description: 'Borrar historial de la sesión' },
     { command: 'ayuda',     description: 'Instrucciones de uso' },
     { command: 'ping',      description: 'Health check de los agentes' },
-    { command: 'update',     description: 'Chequear actualizaciones disponibles' },
-    { command: 'voicemode',  description: 'Solo audio: activar/desactivar respuestas en voz' },
-    { command: 'ttsbutton',  description: 'Activar/desactivar botón 🔊 en respuestas' },
-    { command: 'voz',        description: 'Convertir última respuesta a audio' },
+    { command: 'update',    description: 'Chequear actualizaciones disponibles' },
   ])
 
   logger.info(`✅ Bot corriendo: @${bot.botInfo?.username ?? 'unknown'}`)
