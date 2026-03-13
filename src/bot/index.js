@@ -89,6 +89,10 @@ function createBot() {
           session.editAgentFlow = null
           logger.debug(`editAgentFlow cancelled for user ${userId} (command received)`)
         }
+        if (session.buildTeamFlow) {
+          session.buildTeamFlow = null
+          logger.debug(`buildTeamFlow cancelled for user ${userId} (command received)`)
+        }
       }
     }
     return next()

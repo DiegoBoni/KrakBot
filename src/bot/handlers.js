@@ -1047,7 +1047,52 @@ async function handleTask(ctx, forcedText) {
     try {
       const currentId = session.agent.startsWith('custom:') ? session.agent.slice(7) : null
       const selectedId = await routeWithRootAgent(prompt, session)
-      if (selectedId && selectedId !== currentId) {
+
+      // selectedId can be: string (agent), { type:'team', teamId }, { type:'ambos', agentId, teamId }
+      if (selectedId && typeof selectedId === 'object') {
+        if (tempMsg) await ctx.telegram.deleteMessage(ctx.chat.id, tempMsg.message_id).catch(() => {})
+
+        if (selectedId.type === 'team') {
+          const team = teamManager.get(selectedId.teamId)
+          if (team) {
+            const task = taskManager.create(team.id, prompt, String(userId), ctx.chat.id)
+            await ctx.reply(
+              `🧠 → Equipo *${team.name}*\n✅ *Tarea #${task.id}* creada: _${task.title}_`,
+              { parse_mode: 'Markdown' }
+            )
+            if (team.heartbeatIntervalMin > 0) {
+              heartbeatManager.start(task.id, ctx.chat.id, team.id, team.heartbeatIntervalMin, ctx.telegram)
+            }
+            teamWorkflow.runTask(task.id, ctx.telegram).catch(err =>
+              logger.error(`autoMode team routing error: ${err.message}`)
+            )
+            return  // task dispatched to team, skip regular agent dispatch
+          }
+        } else if (selectedId.type === 'ambos') {
+          const team = teamManager.get(selectedId.teamId)
+          const agentDef = customAgentManager.get(selectedId.agentId)
+          if (team && agentDef) {
+            session.pendingAutoRoutePrompt  = prompt
+            session.pendingAutoRouteTeamId  = selectedId.teamId
+            session.pendingAutoRouteAgentId = selectedId.agentId
+            await ctx.reply(
+              `🧠 Podría ir para dos lados. ¿Cómo querés resolver esto?\n\n` +
+              `*${agentDef.emoji} ${agentDef.name}* — respuesta rápida\n` +
+              `*${team.name}* — flujo completo de equipo`,
+              {
+                parse_mode: 'Markdown',
+                reply_markup: {
+                  inline_keyboard: [[
+                    { text: `${agentDef.emoji} Agente`, callback_data: `setagent:${selectedId.agentId}` },
+                    { text: `👥 Equipo`, callback_data: `autoroute_team:${selectedId.teamId}` },
+                  ]],
+                },
+              }
+            )
+            return  // wait for user button press
+          }
+        }
+      } else if (selectedId && typeof selectedId === 'string' && selectedId !== currentId) {
         agentKey = `custom:${selectedId}`
         const def = customAgentManager.get(selectedId)
         derivedAgentName = def ? `${def.emoji} ${def.name}` : selectedId
@@ -1883,7 +1928,7 @@ async function handleTeamCallback(ctx, data) {
   // team_review_changes:<taskId>  — prompt for feedback text
   if (data.startsWith('team_review_changes:')) {
     const taskId = data.split(':')[1]
-    ctx.session.pendingReviewFeedback = taskId
+    sessionManager.getOrCreate(ctx.from.id).pendingReviewFeedback = taskId
     await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {})
     await ctx.reply(`🔄 Escribí el feedback para la tarea *#${taskId}*:`, { parse_mode: 'Markdown' })
     await ctx.answerCbQuery()
@@ -1972,11 +2017,12 @@ async function handleTeamCallback(ctx, data) {
     const teamId = data.split(':')[1]
     const team = teamManager.get(teamId)
     if (!team) { await ctx.answerCbQuery('Team no encontrado'); return true }
-    const pendingPrompt = ctx.session.pendingAutoRoutePrompt
+    const _autorouteSession = sessionManager.getOrCreate(ctx.from.id)
+    const pendingPrompt = _autorouteSession.pendingAutoRoutePrompt
     if (!pendingPrompt) { await ctx.answerCbQuery(); return true }
-    delete ctx.session.pendingAutoRoutePrompt
-    delete ctx.session.pendingAutoRouteTeamId
-    delete ctx.session.pendingAutoRouteAgentId
+    delete _autorouteSession.pendingAutoRoutePrompt
+    delete _autorouteSession.pendingAutoRouteTeamId
+    delete _autorouteSession.pendingAutoRouteAgentId
 
     await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {})
     const task = taskManager.create(teamId, pendingPrompt, String(ctx.from.id), ctx.chat.id)
@@ -2002,9 +2048,10 @@ async function handleTeamCallback(ctx, data) {
  * Returns true if handled.
  */
 async function handlePendingReviewFeedback(ctx) {
-  const taskId = ctx.session?.pendingReviewFeedback
+  const _reviewSession = sessionManager.getOrCreate(ctx.from.id)
+  const taskId = _reviewSession.pendingReviewFeedback
   if (!taskId) return false
-  delete ctx.session.pendingReviewFeedback
+  delete _reviewSession.pendingReviewFeedback
   const comment = ctx.message?.text ?? ''
   await teamWorkflow.resumeAfterUserReview(taskId, 'changes_requested', comment, ctx.telegram)
   return true

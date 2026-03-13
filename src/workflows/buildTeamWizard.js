@@ -3,6 +3,7 @@
 const logger               = require('../utils/logger')
 const teamManager          = require('../utils/teamManager')
 const customAgentManager   = require('../utils/customAgentManager')
+const sessionManager       = require('../utils/sessionManager')
 const { dispatchWithRole } = require('../agents/router')
 
 const WIZARD_TTL_MS = 30 * 60 * 1000  // 30 minutes
@@ -155,7 +156,8 @@ function confirmKeyboard() {
 // ─── Wizard steps ──────────────────────────────────────────────────────────────
 
 async function startWizard(ctx) {
-  ctx.session.buildTeamFlow = { step: 'domain', ttl: Date.now() }
+  const session = sessionManager.getOrCreate(ctx.from.id)
+  session.buildTeamFlow = { step: 'domain', ttl: Date.now() }
   await ctx.reply(
     '¿Para qué área querés armar tu equipo?',
     { reply_markup: buildDomainKeyboard() }
@@ -163,22 +165,23 @@ async function startWizard(ctx) {
 }
 
 async function handleDomainSelected(ctx, domain) {
-  if (!checkTtl(ctx.session)) {
+  const session = sessionManager.getOrCreate(ctx.from.id)
+  if (!checkTtl(session)) {
     await ctx.reply('El wizard expiró. Escribí /buildteam para empezar de nuevo.')
     return
   }
-  _refreshTtl(ctx.session)
-  ctx.session.buildTeamFlow.domain = domain
+  _refreshTtl(session)
+  session.buildTeamFlow.domain = domain
 
   if (domain === 'custom') {
-    ctx.session.buildTeamFlow.step = 'objective'
+    session.buildTeamFlow.step = 'objective'
     await ctx.editMessageText(
       '🔧 *Personalizado*\n\nContame brevemente qué hace este equipo y qué tipo de tareas va a resolver.\n_(Ej: "Gestión de contratos de alquiler con revisión legal automatizada")_',
       { parse_mode: 'Markdown' }
     ).catch(() => ctx.reply('Contame qué tipo de tareas va a resolver este equipo.'))
   } else {
     const domainLabel = DOMAINS.find(d => d.id === domain)?.label ?? domain
-    ctx.session.buildTeamFlow.step = 'objective'
+    session.buildTeamFlow.step = 'objective'
     await ctx.editMessageText(
       `${domainLabel} ✓\n\nContame en una oración qué tipo de tareas va a resolver este equipo.`,
       { parse_mode: 'Markdown' }
@@ -187,19 +190,20 @@ async function handleDomainSelected(ctx, domain) {
 }
 
 async function handleObjectiveReceived(ctx, objective) {
-  if (!checkTtl(ctx.session)) {
+  const session = sessionManager.getOrCreate(ctx.from.id)
+  if (!checkTtl(session)) {
     await ctx.reply('El wizard expiró. Escribí /buildteam para empezar de nuevo.')
     return
   }
-  _refreshTtl(ctx.session)
-  ctx.session.buildTeamFlow.objective = objective
-  ctx.session.buildTeamFlow.step = 'confirm'
+  _refreshTtl(session)
+  session.buildTeamFlow.objective = objective
+  session.buildTeamFlow.step = 'confirm'
 
   const thinking = await ctx.reply('🤔 Generando recomendación...')
 
   try {
-    const rec = await _generateRecommendation(ctx.session.buildTeamFlow.domain, objective)
-    ctx.session.buildTeamFlow.recommendation = rec
+    const rec = await _generateRecommendation(session.buildTeamFlow.domain, objective)
+    session.buildTeamFlow.recommendation = rec
 
     await ctx.telegram.deleteMessage(ctx.chat.id, thinking.message_id).catch(() => {})
     await ctx.reply(
@@ -213,23 +217,24 @@ async function handleObjectiveReceived(ctx, objective) {
       '❌ No se pudo generar la recomendación. Intentá de nuevo con /buildteam.',
       { parse_mode: 'Markdown' }
     )
-    delete ctx.session.buildTeamFlow
+    delete session.buildTeamFlow
   }
 }
 
 async function handleRetry(ctx) {
-  if (!checkTtl(ctx.session)) {
+  const session = sessionManager.getOrCreate(ctx.from.id)
+  if (!checkTtl(session)) {
     await ctx.reply('El wizard expiró. Escribí /buildteam para empezar de nuevo.')
     return
   }
-  const { domain, objective } = ctx.session.buildTeamFlow
-  ctx.session.buildTeamFlow.step = 'confirm'
+  const { domain, objective } = session.buildTeamFlow
+  session.buildTeamFlow.step = 'confirm'
 
   await ctx.editMessageText('🔄 Generando otra estructura...').catch(() => {})
 
   try {
     const rec = await _generateRecommendation(domain, objective + ' (sugerí una estructura diferente a la anterior)')
-    ctx.session.buildTeamFlow.recommendation = rec
+    session.buildTeamFlow.recommendation = rec
     await ctx.reply(
       formatRecommendation(rec) + '\n\n¿Te parece bien este equipo?',
       { parse_mode: 'Markdown', reply_markup: confirmKeyboard() }
@@ -237,16 +242,17 @@ async function handleRetry(ctx) {
   } catch (err) {
     logger.error(`buildTeamWizard: retry generation failed — ${err.message}`)
     await ctx.reply('❌ No se pudo generar otra estructura. Intentá de nuevo con /buildteam.')
-    delete ctx.session.buildTeamFlow
+    delete session.buildTeamFlow
   }
 }
 
 async function handleCustomize(ctx) {
-  if (!checkTtl(ctx.session)) {
+  const session = sessionManager.getOrCreate(ctx.from.id)
+  if (!checkTtl(session)) {
     await ctx.reply('El wizard expiró. Escribí /buildteam para empezar de nuevo.')
     return
   }
-  ctx.session.buildTeamFlow.step = 'customize'
+  session.buildTeamFlow.step = 'customize'
   await ctx.editMessageText(
     '✏️ *Personalización*\n\nPodés ajustar:\n' +
     '• Nombre del equipo\n• Remover un worker\n• Cambiar reviewer\n• Modo de review (auto/manual/none)\n\n' +
@@ -256,7 +262,8 @@ async function handleCustomize(ctx) {
 }
 
 async function handleCustomizeInput(ctx, text) {
-  if (!checkTtl(ctx.session)) {
+  const session = sessionManager.getOrCreate(ctx.from.id)
+  if (!checkTtl(session)) {
     await ctx.reply('El wizard expiró. Escribí /buildteam para empezar de nuevo.')
     return
   }
@@ -265,7 +272,7 @@ async function handleCustomizeInput(ctx, text) {
     return handleConfirm(ctx)
   }
 
-  const rec = ctx.session.buildTeamFlow.recommendation
+  const rec = session.buildTeamFlow.recommendation
   if (!rec) return handleConfirm(ctx)
 
   // Simple text-based customizations
@@ -274,7 +281,7 @@ async function handleCustomizeInput(ctx, text) {
     const mode = reviewModeMatch[1].toLowerCase()
     if (['auto', 'manual', 'none'].includes(mode)) {
       rec.reviewMode = mode
-      ctx.session.buildTeamFlow.recommendation = rec
+      session.buildTeamFlow.recommendation = rec
       await ctx.reply(`✓ Modo de review cambiado a *${mode}*. Escribí *listo* para crear el equipo.`, { parse_mode: 'Markdown' })
       return
     }
@@ -283,7 +290,7 @@ async function handleCustomizeInput(ctx, text) {
   if (/sin\s+revisor|no\s+revisor|remove\s+reviewer/i.test(text)) {
     rec.reviewer = null
     rec.reviewMode = 'none'
-    ctx.session.buildTeamFlow.recommendation = rec
+    session.buildTeamFlow.recommendation = rec
     await ctx.reply('✓ Revisor removido. Escribí *listo* para crear el equipo.', { parse_mode: 'Markdown' })
     return
   }
@@ -295,14 +302,15 @@ async function handleCustomizeInput(ctx, text) {
 }
 
 async function handleConfirm(ctx) {
-  if (!checkTtl(ctx.session)) {
+  const session = sessionManager.getOrCreate(ctx.from.id)
+  if (!checkTtl(session)) {
     await ctx.reply('El wizard expiró. Escribí /buildteam para empezar de nuevo.')
     return
   }
 
-  const rec = ctx.session.buildTeamFlow.recommendation
+  const rec = session.buildTeamFlow?.recommendation
   if (!rec) {
-    delete ctx.session.buildTeamFlow
+    delete session.buildTeamFlow
     await ctx.reply('No hay recomendación activa. Escribí /buildteam para empezar.')
     return
   }
@@ -363,7 +371,7 @@ async function handleConfirm(ctx) {
       reviewMode:  rec.reviewMode ?? 'auto',
     })
 
-    delete ctx.session.buildTeamFlow
+    delete session.buildTeamFlow
     if (creating) await ctx.telegram.deleteMessage(ctx.chat.id, creating.message_id).catch(() => {})
 
     const workerList = workerIds.join(', ')
@@ -377,7 +385,7 @@ async function handleConfirm(ctx) {
     logger.error(`buildTeamWizard: confirm failed — ${err.message}`)
     if (creating) await ctx.telegram.deleteMessage(ctx.chat.id, creating.message_id).catch(() => {})
     await ctx.reply(`❌ Error creando el equipo: ${err.message}`)
-    delete ctx.session.buildTeamFlow
+    delete session.buildTeamFlow
   }
 }
 
@@ -388,9 +396,10 @@ async function handleConfirm(ctx) {
  * Returns true if the message was handled by the wizard.
  */
 async function handleTextIfActive(ctx) {
-  const flow = ctx.session?.buildTeamFlow
+  const session = sessionManager.getOrCreate(ctx.from.id)
+  const flow = session.buildTeamFlow
   if (!flow) return false
-  if (!checkTtl(ctx.session)) {
+  if (!checkTtl(session)) {
     await ctx.reply('El wizard expiró. Escribí /buildteam para empezar de nuevo.')
     return true
   }
