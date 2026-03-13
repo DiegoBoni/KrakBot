@@ -6,6 +6,9 @@ const { readFileSync } = require('fs')
 const { rmSync } = require('fs')
 const { pipeline } = require('stream/promises')
 const { randomUUID } = require('crypto')
+const mammoth = require('mammoth')
+const XLSX    = require('xlsx')
+const JSZip   = require('jszip')
 
 // ─── Allowlists ───────────────────────────────────────────────────────────────
 
@@ -13,6 +16,9 @@ const ALLOWED_TEXT_EXTS = new Set([
   'txt', 'md', 'csv', 'log', 'py', 'js', 'ts', 'jsx', 'tsx',
   'java', 'go', 'rs', 'rb', 'php', 'sh', 'sql', 'yaml', 'yml',
   'json', 'toml', 'html', 'css', 'xml', 'ini', 'env', 'conf',
+  'doc', 'docx',
+  'xls', 'xlsx',
+  'ppt', 'pptx',
 ])
 
 const ALLOWED_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif'])
@@ -106,6 +112,76 @@ function readTextFile(localPath, maxChars = MAX_TEXT_CHARS) {
   return content
 }
 
+// ─── Office format readers ────────────────────────────────────────────────────
+
+/**
+ * Extract text from .docx (and best-effort from .doc) files.
+ */
+async function readWordFile(localPath, maxChars = MAX_TEXT_CHARS) {
+  const ext = path.extname(localPath).toLowerCase()
+  let content
+  if (ext === '.docx') {
+    const result = await mammoth.extractRawText({ path: localPath })
+    content = result.value
+  } else {
+    // .doc — best-effort ASCII extraction
+    const raw = readFileSync(localPath, 'latin1')
+    content = raw.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, ' ').replace(/ {3,}/g, '  ').trim()
+  }
+  if (content.length > maxChars) {
+    return content.slice(0, maxChars) + `\n\n[... archivo truncado a ${maxChars.toLocaleString()} caracteres ...]`
+  }
+  return content
+}
+
+/**
+ * Extract text (as CSV per sheet) from .xlsx / .xls files.
+ */
+function readExcelFile(localPath, maxChars = MAX_TEXT_CHARS) {
+  const workbook = XLSX.readFile(localPath)
+  const parts = []
+  for (const sheetName of workbook.SheetNames) {
+    const csv = XLSX.utils.sheet_to_csv(workbook.Sheets[sheetName])
+    parts.push(`=== Hoja: ${sheetName} ===\n${csv}`)
+  }
+  let content = parts.join('\n\n')
+  if (content.length > maxChars) {
+    return content.slice(0, maxChars) + `\n\n[... archivo truncado a ${maxChars.toLocaleString()} caracteres ...]`
+  }
+  return content
+}
+
+/**
+ * Extract text from .pptx (and best-effort from .ppt) files.
+ */
+async function readPptxFile(localPath, maxChars = MAX_TEXT_CHARS) {
+  const ext = path.extname(localPath).toLowerCase()
+  let content
+  if (ext === '.pptx') {
+    const data = readFileSync(localPath)
+    const zip = await JSZip.loadAsync(data)
+    const slideFiles = Object.keys(zip.files)
+      .filter(f => /^ppt\/slides\/slide\d+\.xml$/.test(f))
+      .sort()
+    const texts = []
+    for (const slideFile of slideFiles) {
+      const xml = await zip.files[slideFile].async('string')
+      const matches = xml.match(/<a:t[^>]*>([^<]*)<\/a:t>/g) || []
+      const slideText = matches.map(m => m.replace(/<[^>]+>/g, '')).join(' ')
+      if (slideText.trim()) texts.push(slideText.trim())
+    }
+    content = texts.join('\n\n')
+  } else {
+    // .ppt — best-effort ASCII extraction
+    const raw = readFileSync(localPath, 'latin1')
+    content = raw.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, ' ').replace(/ {3,}/g, '  ').trim()
+  }
+  if (content.length > maxChars) {
+    return content.slice(0, maxChars) + `\n\n[... archivo truncado a ${maxChars.toLocaleString()} caracteres ...]`
+  }
+  return content
+}
+
 // ─── Cleanup ──────────────────────────────────────────────────────────────────
 
 /** Delete a single file silently (no-op if already deleted). */
@@ -167,6 +243,9 @@ function fileEmoji(originalName) {
   if (codeExts.has(ext)) return '💻'
   if (ext === 'pdf') return '📄'
   if (ext === 'csv') return '📊'
+  if (ext === 'doc' || ext === 'docx') return '📝'
+  if (ext === 'xls' || ext === 'xlsx') return '📊'
+  if (ext === 'ppt' || ext === 'pptx') return '📑'
   if (ALLOWED_IMAGE_EXTS.has(ext)) return '🖼️'
   return '📎'
 }
@@ -178,6 +257,9 @@ module.exports = {
   getMaxFileSizeBytes,
   downloadTelegramFile,
   readTextFile,
+  readWordFile,
+  readExcelFile,
+  readPptxFile,
   cleanupFile,
   cleanupUserUploads,
   cleanupExpiredUploads,
