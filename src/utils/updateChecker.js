@@ -162,6 +162,7 @@ async function performUpdate() {
     logger.error(`updateChecker: could not write pending file — ${err.message}`)
   }
 
+  let restartInitiated = false
   try {
     logger.info('updateChecker: git fetch origin...')
     execSync('git fetch origin', { cwd: ROOT_DIR, timeout: 30_000 })
@@ -176,10 +177,18 @@ async function performUpdate() {
     }
 
     logger.info(`updateChecker: pm2 restart ${pm2App}...`)
+    restartInitiated = true
     execSync(`pm2 restart ${pm2App}`, { timeout: 30_000 })
-    // Process is replaced by pm2 — execution stops here
+    // pm2 reemplaza este proceso — la ejecución no debería llegar acá
 
   } catch (err) {
+    if (restartInitiated) {
+      // El pm2 está matando este proceso como parte del restart — comportamiento esperado.
+      // El archivo pending queda intacto para que el nuevo proceso envíe el mensaje de éxito.
+      logger.info(`updateChecker: pm2 reiniciando el proceso (esperado) — ${err.message}`)
+      return
+    }
+    // Error real antes del restart
     logger.error(`updateChecker: update failed — ${err.message}`)
     try { unlinkSync(PENDING_FILE) } catch {}
     if (_bot) {
