@@ -80,6 +80,7 @@ function create(def) {
     description: def.description,
     systemPrompt: def.systemPrompt,
     cli: def.cli,
+    mcpServers: Array.isArray(def.mcpServers) ? def.mcpServers : [],
     ttsVoice: def.ttsVoice ?? null,
     ttsGender: def.ttsGender === 'fem' ? 'fem' : 'masc',
     createdAt: new Date().toISOString(),

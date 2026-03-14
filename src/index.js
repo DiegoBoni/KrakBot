@@ -10,6 +10,9 @@ const { AGENTS } = require('./agents/router')
 const { ensureTempDir, checkWhisper } = require('./utils/audioTranscriber')
 const updateChecker = require('./utils/updateChecker')
 const customAgentManager = require('./utils/customAgentManager')
+const teamManager        = require('./utils/teamManager')
+const taskManager        = require('./utils/taskManager')
+const heartbeatManager   = require('./utils/heartbeatManager')
 const fileManager = require('./utils/fileManager')
 const ttsService = require('./utils/ttsService')
 
@@ -37,6 +40,10 @@ async function main() {
   // Initialize custom agent store (creates data/custom-agents.json if needed)
   customAgentManager.init()
 
+  // Initialize team and task stores
+  teamManager.init()
+  taskManager.init()
+
   // Validate CLI binaries and API key env vars before accepting requests.
   // Non-fatal: bot still launches even if some CLIs are missing.
   global.__cliStatus = validateAll(AGENTS)
@@ -61,6 +68,26 @@ async function main() {
 
   const bot = createBot()
 
+  // Mark any in-flight team tasks as interrupted (bot was restarted)
+  const interrupted = taskManager.markInterrupted()
+  if (interrupted.length > 0) {
+    logger.warn(`${interrupted.length} team task(s) interrupted on restart — will notify users`)
+    // Best-effort: notify after bot.launch() so telegram is ready
+    setTimeout(() => {
+      for (const task of interrupted) {
+        bot.telegram.sendMessage(
+          task.notifyChatId,
+          `⚠️ La tarea *#${task.id}* fue interrumpida por un reinicio del bot.\nUsá /task para relanzarla.`,
+          { parse_mode: 'Markdown' }
+        ).catch(() => {})
+      }
+    }, 5000)
+  }
+
+  // Restore heartbeats for tasks that were active before restart (none after markInterrupted,
+  // but useful if interrupted logic is bypassed or for future scheduled tasks)
+  heartbeatManager.restoreActive(bot.telegram)
+
   // Init auto-updater with bot instance (must happen before bot.launch)
   updateChecker.init(bot)
 
@@ -74,6 +101,7 @@ async function main() {
   // Graceful shutdown
   const shutdown = (signal) => {
     logger.info(`${signal} recibido — apagando bot...`)
+    heartbeatManager.stopAll()
     clearInterval(cleanupInterval)
     bot.stop(signal)
     process.exit(0)
