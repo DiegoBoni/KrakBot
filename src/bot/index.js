@@ -62,6 +62,7 @@ const {
   handlePendingReviewFeedback,
   handleTextIfActive,
 } = require('./handlers')
+const buildTeamWizard = require('../workflows/buildTeamWizard')
 const logger = require('../utils/logger')
 
 function createBot() {
@@ -245,6 +246,12 @@ function createBot() {
   bot.action(/^setagent:(.+)$/, async (ctx) => {
     await ctx.answerCbQuery().catch(() => {})
     await handleSetAgent(ctx, `custom:${ctx.match[1]}`)
+  })
+
+  // buildteam: model selection
+  bot.action(/^buildteam_model:(.+)$/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {})
+    await buildTeamWizard.handleModelSelected(ctx, ctx.match[1])
   })
 
   // Team workflow callbacks (catch-all for team_* and buildteam_* prefixes)

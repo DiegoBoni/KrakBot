@@ -25,6 +25,9 @@ data/sessions/
 data/uploads/
 data/.update-pending.json
 data/custom-agents.json
+data/teams.json
+data/tasks.json
+data/team-tasks.json
 
 # macOS metadata
 .DS_Store

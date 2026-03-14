@@ -107,6 +107,7 @@ function create(def) {
     reviewMode:            def.reviewMode ?? 'auto',
     maxReviewIterations:   Number.isInteger(def.maxReviewIterations) ? def.maxReviewIterations : 3,
     heartbeatIntervalMin:  Number.isInteger(def.heartbeatIntervalMin) ? def.heartbeatIntervalMin : 5,
+    defaultMcpServers:     Array.isArray(def.defaultMcpServers) ? def.defaultMcpServers : [],
     createdAt:             new Date().toISOString(),
   }
 

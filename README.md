@@ -12,7 +12,7 @@
 
 > Gateway de Telegram hacia múltiples agentes de IA CLI — Claude Code, Gemini CLI y OpenAI Codex CLI.
 > Un mensaje (o un archivo o una nota de voz), el agente que elijas, respuesta directo en el chat.
-> Creá agentes personalizados con system prompts propios, voz TTS propia y un Root Agent que los orquesta automáticamente.
+> Creá agentes personalizados, organizalos en equipos multi-agente, y dejá que un Root Agent los orqueste automáticamente.
 
 ---
 
@@ -109,11 +109,32 @@ npm start
 | `/delagent`  | Borrar un agente personalizado                              |
 | `/editagent` | Editar nombre, descripción, system prompt o CLI de un agente|
 
+### Equipos multi-agente
+
+| Comando               | Descripción                                                          |
+|-----------------------|----------------------------------------------------------------------|
+| `/buildteam`          | Wizard para crear un equipo con IA (coordinator + workers + reviewer)|
+| `/teams`              | Listar todos los equipos creados                                     |
+| `/delteam <id>`       | Eliminar un equipo                                                   |
+| `/editteam <id>`      | Editar modo de review, heartbeat o máx. iteraciones de un equipo     |
+
+### Tareas de equipos
+
+| Comando                  | Descripción                                                     |
+|--------------------------|-----------------------------------------------------------------|
+| `/task <team-id> <desc>` | Crear y ejecutar una tarea en un equipo                         |
+| `/tasks`                 | Ver tareas activas y completadas hoy                            |
+| `/tasks all`             | Ver todo el historial (activas, completadas, fallidas, canceladas)|
+| `/tasks <team-id>`       | Ver todas las tareas de un equipo específico                    |
+| `/taskstatus <id>`       | Detalle completo de una tarea con historial de pasos            |
+| `/canceltask <id>`       | Cancelar una tarea activa                                       |
+| `/teamstatus <id>`       | Estado del equipo y sus tareas activas                          |
+
 ### Root Agent & auto-routing
 
 | Comando      | Descripción                                                             |
 |--------------|-------------------------------------------------------------------------|
-| `/auto`      | Enviar una tarea al Root Agent para que elija el mejor agente           |
+| `/auto`      | Enviar una tarea al Root Agent para que elija el mejor agente o equipo  |
 | `/automode`  | Activar/desactivar routing automático en todos los mensajes             |
 
 ### Sesión e historial
@@ -174,6 +195,8 @@ El bot te guía paso a paso:
 
 El agente queda disponible inmediatamente con un ID generado automáticamente (ej: `python-expert`).
 
+> Los MCPs (herramientas externas como Gmail, GitHub, etc.) se configuran directamente en cada CLI — Claude con `claude mcp add`, Gemini con su config, etc. Todos los sub-agentes de ese CLI los heredan automáticamente.
+
 ### Usar un agente personalizado
 
 **Activarlo para toda la sesión:**
@@ -207,9 +230,84 @@ Muestra la lista de agentes custom con confirmación antes de borrar.
 
 ---
 
+## Equipos multi-agente
+
+Los equipos permiten ejecutar tareas complejas con un flujo **Coordinator → Worker → Reviewer**. El coordinator analiza la tarea, la asigna al worker más adecuado, y un reviewer valida el resultado antes de entregarlo.
+
+### Crear un equipo
+
+```
+/buildteam
+```
+
+El wizard de IA te guía paso a paso:
+
+1. **Dominio** — elegís el área del equipo (desarrollo, marketing, productividad, legal, etc.)
+2. **Objetivo** — describís en una oración qué tipo de tareas va a resolver
+3. **Recomendación IA** — el bot genera la estructura completa (coordinator, workers, reviewer, system prompts)
+4. **Confirmación** — podés aprobar, personalizar o pedir otra estructura
+5. **Modelo por agente** — elegís Claude, Gemini o Codex para cada agente del equipo individualmente
+
+El equipo y todos sus agentes quedan creados y disponibles inmediatamente.
+
+### Ejecutar una tarea en un equipo
+
+**Con comando:**
+```
+/task equipo-productividad organizá mi agenda de la semana
+```
+
+**Con mención directa** (igual que los agentes custom):
+```
+@equipo-productividad organizá mi agenda de la semana
+```
+
+**Con autoMode activo** — el Root Agent detecta automáticamente si la tarea corresponde a un equipo.
+
+Al crear la tarea, el bot te ofrece:
+- **👁 Ver diálogo interno** — activa el modo live: ves cada paso del flujo (coordinator → worker → reviewer) a medida que ocurre en tiempo real
+- **❌ Cancelar** — cancela la tarea
+
+### Flujo de una tarea
+
+```
+Tarea recibida
+  → Coordinator analiza y asigna al worker más adecuado
+  → Worker ejecuta la tarea con su system prompt
+  → Reviewer evalúa el resultado
+     ├── Aprobado → entrega el resultado final
+     └── Cambios → el worker reintenta con el feedback
+```
+
+El modo de review se configura por equipo:
+- `auto` — el reviewer es un agente IA
+- `manual` — vos aprobás o pedís cambios
+- `none` — sin revisión, el worker entrega directo
+
+### Gestión de equipos
+
+```
+/teams              # listar todos los equipos
+/teamstatus <id>    # ver estado y tareas activas de un equipo
+/editteam <id>      # editar modo de review, heartbeat o máx. iteraciones
+/delteam <id>       # eliminar un equipo
+```
+
+### Gestión de tareas
+
+```
+/tasks              # activas + completadas hoy
+/tasks all          # todo el historial (activas, hechas, fallidas, canceladas)
+/tasks <team-id>    # tareas de un equipo específico
+/taskstatus <id>    # detalle completo con historial de pasos
+/canceltask <id>    # cancelar tarea activa
+```
+
+---
+
 ## Root Agent & Auto-routing
 
-El Root Agent lee la descripción de todos tus agentes personalizados y elige automáticamente el más adecuado para cada tarea.
+El Root Agent lee la descripción de todos tus agentes personalizados y equipos, y elige automáticamente el más adecuado para cada tarea.
 
 ### Una sola tarea con routing automático
 
@@ -223,7 +321,10 @@ El Root Agent lee la descripción de todos tus agentes personalizados y elige au
 /automode
 ```
 
-Con automode activado, **todos los mensajes** pasan primero por el Root Agent. Si ningún agente custom aplica, usa el agente activo de la sesión.
+Con automode activado, **todos los mensajes** pasan primero por el Root Agent. Puede derivar a:
+- Un agente personalizado (respuesta directa)
+- Un equipo (flujo coordinator → worker → reviewer)
+- El agente activo de la sesión (si ninguno aplica mejor)
 
 El estado del automode se muestra en `/sesion` y se persiste entre reinicios.
 
@@ -248,8 +349,6 @@ KrakBot puede responder con audio usando **edge-tts** (Microsoft Edge TTS, multi
 ```
 /ttsvoice
 ```
-
-> También funcionan los nombres anteriores como aliases: `/agentes`, `/sesion`, `/limpiar`, `/voz`.
 
 Muestra un selector en 2 pasos:
 1. Elegís el **idioma** (12 idiomas disponibles)
@@ -344,16 +443,16 @@ Los archivos se eliminan del disco inmediatamente después de ser procesados. Un
 
 ---
 
-## Menciones de agente
+## Menciones
 
-Prefijá cualquier mensaje con `@alias` para usar un agente específico solo en esa respuesta,
-sin cambiar el agente activo de la sesión:
+Prefijá cualquier mensaje con `@id` para dirigirte a un agente o equipo específico en esa sola respuesta, sin cambiar el agente activo de la sesión:
 
 ```
 @claude explicame esta función
 @gem resumí este texto
 @codex refactorizá este método
 @python-expert optimizá esta función
+@equipo-dev desarrollá el módulo de autenticación
 ```
 
 Aliases de agentes integrados:
@@ -364,7 +463,7 @@ Aliases de agentes integrados:
 | Gemini     | `@gemini`, `@gem`, `@g`  |
 | Codex      | `@codex`, `@gpt`, `@o`   |
 
-Para agentes personalizados, usá su ID directamente: `@python-expert`, `@sql-helper`, etc.
+Para agentes y equipos personalizados, usá su ID directamente: `@python-expert`, `@equipo-dev`, etc.
 
 ---
 
@@ -380,40 +479,54 @@ src/
 │   └── codex.js              # Runner de Codex
 ├── bot/
 │   ├── index.js              # Setup de Telegraf, registro de comandos, error handler
-│   ├── handlers.js           # Handlers de comandos, mensajes, flows de agentes custom
+│   ├── handlers.js           # Handlers de comandos, mensajes, flows de agentes y equipos
 │   └── middleware.js         # Middleware de autenticación (allowlist de usuarios)
 ├── utils/
 │   ├── logger.js             # Logger Winston
 │   ├── sessionManager.js     # Store de sesiones con persistencia a disco (TTL configurable)
 │   ├── contextBuilder.js     # Construye el prompt final con soul, memorias e historial
 │   ├── customAgentManager.js # CRUD de agentes personalizados (persiste en data/)
+│   ├── teamManager.js        # CRUD de equipos multi-agente (persiste en data/)
+│   ├── taskManager.js        # Estado y ciclo de vida de tareas (máquina de estados)
+│   ├── heartbeatManager.js   # Notificaciones periódicas de progreso para tareas largas
 │   ├── cliValidator.js       # Validación de binarios CLI al arranque
 │   ├── audioTranscriber.js   # Transcripción de notas de voz con mlx_whisper (Whisper local)
 │   ├── ttsService.js         # Text-to-speech: edge-tts (primario) + say (fallback), catálogo de voces
 │   ├── textSanitizer.js      # Limpieza de markdown antes de enviar a TTS
 │   ├── fileManager.js        # Descarga, validación, lectura y limpieza de archivos adjuntos
 │   └── updateChecker.js      # Auto-updater desde GitHub
+├── workflows/
+│   ├── buildTeamWizard.js    # Wizard interactivo para crear equipos asistido por IA
+│   └── teamWorkflow.js       # Orquestación del flujo coordinator → worker → reviewer
 └── index.js                  # Entry point: arranque, validación, shutdown graceful
 
 data/                         # Generado en runtime, excluido de git
 ├── sessions/                 # Sesiones persistidas por usuario (JSON)
 ├── uploads/                  # Archivos adjuntos temporales (se borran tras procesar)
-└── custom-agents.json        # Definiciones de agentes personalizados
+├── custom-agents.json        # Definiciones de agentes personalizados
+├── teams.json                # Definiciones de equipos multi-agente
+└── team-tasks.json           # Historial de tareas
 ```
 
 **Flujo de un mensaje:**
 
 ```
 Telegram msg / archivo
-  → middleware.js       (auth check)
-  → handlers.js         (descarga archivo si aplica, extrae @alias, detecta flows activos o autoMode)
-  → fileManager.js      (valida tipo y tamaño, guarda en data/uploads/<userId>/)
-  → router.js           (Root Agent si autoMode, luego resuelve agente)
-  → custom agent        (inyecta system prompt vía --append-system-prompt o inline)
-    o claude|gemini|codex.js  (construye contexto con soul + memorias + historial + archivo)
-  → runner.js           (spawn CLI con @/ruta para binarios o [ARCHIVO] para texto, timeout, heartbeat cada 30s)
-  → respuesta en chunks ≤4000 chars → Telegram
-  → fileManager.js      (borra el archivo del disco)
+  → middleware.js         (auth check)
+  → handlers.js           (descarga archivo, extrae @alias, detecta flows activos o autoMode)
+  → router.js             (Root Agent si autoMode → agente o equipo)
+
+  Si agente:
+    → custom agent / claude|gemini|codex.js
+    → runner.js           (spawn CLI, timeout, heartbeat cada 30s)
+    → respuesta en chunks ≤4000 chars → Telegram
+
+  Si equipo:
+    → teamWorkflow.runTask()
+    → coordinator         (elige worker + instrucción específica)
+    → worker              (ejecuta la tarea con su system prompt)
+    → reviewer            (valida o pide cambios)
+    → resultado final → Telegram
 ```
 
 ---
@@ -424,7 +537,7 @@ Telegram msg / archivo
 - El bot solo acepta usuarios en `AUTHORIZED_USERS` (si está configurado).
 - Las API keys nunca se loguean, solo se verifica su presencia al arranque.
 - Los CLIs corren con `cwd` en `HOME` para que no levanten archivos del proyecto.
-- Los datos de sesión y agentes custom se guardan en `data/` (local, no en el repositorio).
+- Los datos de sesión, agentes y equipos se guardan en `data/` (local, no en el repositorio).
 - Los archivos adjuntos se guardan con nombres UUID en `data/uploads/<userId>/` — sin riesgo de path traversal.
 - Los archivos se eliminan del disco inmediatamente después de ser procesados por el agente.
 - El tipo de archivo se valida por MIME type y extensión antes de ser aceptado.
@@ -437,7 +550,7 @@ Telegram msg / archivo
 
 > Telegram gateway to multiple AI CLI agents — Claude Code, Gemini CLI and OpenAI Codex CLI.
 > A message (or a file or a voice note), the agent of your choice, response right in the chat.
-> Create custom agents with their own system prompts, their own TTS voice, and a Root Agent that orchestrates them automatically.
+> Create custom agents, organize them into multi-agent teams, and let a Root Agent orchestrate them automatically.
 
 ---
 
@@ -534,11 +647,32 @@ npm start
 | `/delagent`  | Delete a custom agent                                        |
 | `/editagent` | Edit an agent's name, description, system prompt or CLI      |
 
+### Multi-agent teams
+
+| Command               | Description                                                          |
+|-----------------------|----------------------------------------------------------------------|
+| `/buildteam`          | AI-powered wizard to create a team (coordinator + workers + reviewer)|
+| `/teams`              | List all created teams                                               |
+| `/delteam <id>`       | Delete a team                                                        |
+| `/editteam <id>`      | Edit review mode, heartbeat or max iterations of a team              |
+
+### Team tasks
+
+| Command                  | Description                                                      |
+|--------------------------|------------------------------------------------------------------|
+| `/task <team-id> <desc>` | Create and run a task on a team                                  |
+| `/tasks`                 | View active tasks and tasks completed today                      |
+| `/tasks all`             | View full history (active, done, failed, cancelled)              |
+| `/tasks <team-id>`       | View all tasks for a specific team                               |
+| `/taskstatus <id>`       | Full task detail with step-by-step history                       |
+| `/canceltask <id>`       | Cancel an active task                                            |
+| `/teamstatus <id>`       | Team status and its active tasks                                 |
+
 ### Root Agent & auto-routing
 
 | Command      | Description                                                          |
 |--------------|----------------------------------------------------------------------|
-| `/auto`      | Send a task to the Root Agent to pick the best agent                 |
+| `/auto`      | Send a task to the Root Agent to pick the best agent or team         |
 | `/automode`  | Toggle automatic routing on all messages                             |
 
 ### Session & history
@@ -599,6 +733,8 @@ The bot guides you step by step:
 
 The agent is available immediately with an auto-generated ID (e.g. `python-expert`).
 
+> MCPs (external tools like Gmail, GitHub, etc.) are configured directly in each CLI — Claude with `claude mcp add`, Gemini with its own config, etc. All sub-agents for that CLI inherit them automatically.
+
 ### Using a custom agent
 
 **Activate for the whole session:**
@@ -632,9 +768,84 @@ Shows the list of custom agents with confirmation before deleting.
 
 ---
 
+## Multi-agent teams
+
+Teams let you run complex tasks through a **Coordinator → Worker → Reviewer** flow. The coordinator analyzes the task, assigns it to the most suitable worker, and a reviewer validates the result before delivery.
+
+### Creating a team
+
+```
+/buildteam
+```
+
+The AI wizard guides you step by step:
+
+1. **Domain** — choose the team's area (development, marketing, productivity, legal, etc.)
+2. **Objective** — describe in one sentence what kind of tasks it will handle
+3. **AI recommendation** — the bot generates the full structure (coordinator, workers, reviewer, system prompts)
+4. **Confirmation** — approve, customize or request a different structure
+5. **Model per agent** — choose Claude, Gemini or Codex for each agent individually
+
+The team and all its agents are created and available immediately.
+
+### Running a task on a team
+
+**With command:**
+```
+/task productivity-team organize my week
+```
+
+**With direct mention** (same as custom agents):
+```
+@productivity-team organize my week
+```
+
+**With autoMode active** — the Root Agent automatically detects when a task belongs to a team.
+
+When a task is created, the bot offers:
+- **👁 View internal dialog** — activates live mode: see each step of the flow (coordinator → worker → reviewer) as it happens in real time
+- **❌ Cancel** — cancels the task
+
+### Task flow
+
+```
+Task received
+  → Coordinator analyzes and assigns to the most suitable worker
+  → Worker executes the task with its system prompt
+  → Reviewer evaluates the result
+     ├── Approved → delivers the final result
+     └── Changes → worker retries with the feedback
+```
+
+Review mode is configured per team:
+- `auto` — the reviewer is an AI agent
+- `manual` — you approve or request changes
+- `none` — no review, the worker delivers directly
+
+### Team management
+
+```
+/teams              # list all teams
+/teamstatus <id>    # view status and active tasks of a team
+/editteam <id>      # edit review mode, heartbeat or max iterations
+/delteam <id>       # delete a team
+```
+
+### Task management
+
+```
+/tasks              # active + completed today
+/tasks all          # full history (active, done, failed, cancelled)
+/tasks <team-id>    # tasks for a specific team
+/taskstatus <id>    # full detail with step history
+/canceltask <id>    # cancel an active task
+```
+
+---
+
 ## Root Agent & Auto-routing
 
-The Root Agent reads the description of all your custom agents and automatically picks the most suitable one for each task.
+The Root Agent reads the description of all your custom agents and teams, and automatically picks the most suitable one for each task.
 
 ### Single task with automatic routing
 
@@ -648,7 +859,10 @@ The Root Agent reads the description of all your custom agents and automatically
 /automode
 ```
 
-With automode enabled, **all messages** go through the Root Agent first. If no custom agent applies, it uses the active session agent.
+With automode enabled, **all messages** go through the Root Agent first. It can route to:
+- A custom agent (direct response)
+- A team (coordinator → worker → reviewer flow)
+- The active session agent (if nothing else fits better)
 
 Automode state is shown in `/session` and persists across restarts.
 
@@ -767,9 +981,9 @@ Files are deleted from disk immediately after processing. An hourly cleanup job 
 
 ---
 
-## Agent mentions
+## Mentions
 
-Prefix any message with `@alias` to use a specific agent for that response only,
+Prefix any message with `@id` to direct it to a specific agent or team for that response only,
 without changing the active session agent:
 
 ```
@@ -777,6 +991,7 @@ without changing the active session agent:
 @gem summarize this text
 @codex refactor this method
 @python-expert optimize this function
+@dev-team build the authentication module
 ```
 
 Built-in agent aliases:
@@ -787,7 +1002,7 @@ Built-in agent aliases:
 | Gemini | `@gemini`, `@gem`, `@g`  |
 | Codex  | `@codex`, `@gpt`, `@o`   |
 
-For custom agents, use their ID directly: `@python-expert`, `@sql-helper`, etc.
+For custom agents and teams, use their ID directly: `@python-expert`, `@dev-team`, etc.
 
 ---
 
@@ -803,40 +1018,54 @@ src/
 │   └── codex.js              # Codex runner
 ├── bot/
 │   ├── index.js              # Telegraf setup, command registration, error handler
-│   ├── handlers.js           # Command handlers, messages, custom agent flows
+│   ├── handlers.js           # Command handlers, messages, custom agent and team flows
 │   └── middleware.js         # Auth middleware (user allowlist)
 ├── utils/
 │   ├── logger.js             # Winston logger
 │   ├── sessionManager.js     # Session store with disk persistence (configurable TTL)
 │   ├── contextBuilder.js     # Builds final prompt with soul, memories and history
 │   ├── customAgentManager.js # Custom agent CRUD (persists to data/)
+│   ├── teamManager.js        # Multi-agent team CRUD (persists to data/)
+│   ├── taskManager.js        # Task state and lifecycle (state machine)
+│   ├── heartbeatManager.js   # Periodic progress notifications for long-running tasks
 │   ├── cliValidator.js       # CLI binary validation at startup
 │   ├── audioTranscriber.js   # Voice note transcription with mlx_whisper (local Whisper)
 │   ├── ttsService.js         # Text-to-speech: edge-tts (primary) + say (fallback), voice catalog
 │   ├── textSanitizer.js      # Strips markdown before sending to TTS
 │   ├── fileManager.js        # File download, validation, reading and cleanup
 │   └── updateChecker.js      # Auto-updater from GitHub
+├── workflows/
+│   ├── buildTeamWizard.js    # Interactive AI-assisted wizard for creating teams
+│   └── teamWorkflow.js       # Coordinator → worker → reviewer orchestration
 └── index.js                  # Entry point: startup, validation, graceful shutdown
 
 data/                         # Generated at runtime, excluded from git
 ├── sessions/                 # Per-user persisted sessions (JSON)
 ├── uploads/                  # Temporary file attachments (deleted after processing)
-└── custom-agents.json        # Custom agent definitions
+├── custom-agents.json        # Custom agent definitions
+├── teams.json                # Multi-agent team definitions
+└── tasks.json                # Task history
 ```
 
 **Message flow:**
 
 ```
 Telegram msg / file
-  → middleware.js       (auth check)
-  → handlers.js         (download file if applicable, extract @alias, detect active flows or autoMode)
-  → fileManager.js      (validate type and size, save to data/uploads/<userId>/)
-  → router.js           (Root Agent if autoMode, then resolve agent)
-  → custom agent        (inject system prompt via --append-system-prompt or inline)
-    or claude|gemini|codex.js  (build context with soul + memories + history + file)
-  → runner.js           (spawn CLI with @/path for binaries or [FILE] for text, timeout, heartbeat every 30s)
-  → response in chunks ≤4000 chars → Telegram
-  → fileManager.js      (delete file from disk)
+  → middleware.js         (auth check)
+  → handlers.js           (download file, extract @alias, detect active flows or autoMode)
+  → router.js             (Root Agent if autoMode → agent or team)
+
+  If agent:
+    → custom agent / claude|gemini|codex.js
+    → runner.js           (spawn CLI, timeout, heartbeat every 30s)
+    → response in chunks ≤4000 chars → Telegram
+
+  If team:
+    → teamWorkflow.runTask()
+    → coordinator         (picks worker + specific instruction)
+    → worker              (executes task with its system prompt)
+    → reviewer            (approves or requests changes)
+    → final result → Telegram
 ```
 
 ---
@@ -847,7 +1076,7 @@ Telegram msg / file
 - The bot only accepts users in `AUTHORIZED_USERS` (if configured).
 - API keys are never logged, only their presence is verified at startup.
 - CLIs run with `cwd` set to `HOME` so they don't pick up project files.
-- Session data and custom agents are saved in `data/` (local, not in the repository).
+- Session data, agents and teams are saved in `data/` (local, not in the repository).
 - Attached files are saved with UUID names in `data/uploads/<userId>/` — no path traversal risk.
 - Files are deleted from disk immediately after being processed by the agent.
 - File type is validated by MIME type and extension before being accepted.

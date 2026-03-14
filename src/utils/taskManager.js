@@ -76,6 +76,8 @@ function create(teamId, description, userId, chatId, priority = 'normal') {
     reviewComment:        null,
     output:               null,
     iterations:           0,
+    liveView:             false,
+    dialogLog:            [],
     scheduledAt:          null,
     startedAt:            null,
     completedAt:          null,
@@ -108,6 +110,10 @@ function listCompletedToday(teamId) {
     t.completedAt &&
     new Date(t.completedAt) >= startOfDay
   )
+}
+
+function listAll(teamId) {
+  return teamId ? _tasks.filter(t => t.teamId === teamId) : [..._tasks]
 }
 
 // ─── State machine ─────────────────────────────────────────────────────────────
@@ -169,6 +175,21 @@ function setWorkerOutput(taskId, output) {
     by: _tasks[idx].assignedTo ?? 'worker',
     note: '',
   })
+  _save()
+}
+
+function setLiveView(taskId, value) {
+  const task = _tasks.find(t => t.id === taskId)
+  if (!task) return
+  task.liveView = !!value
+  _save()
+}
+
+function appendDialogLog(taskId, entry) {
+  const task = _tasks.find(t => t.id === taskId)
+  if (!task) return
+  if (!Array.isArray(task.dialogLog)) task.dialogLog = []
+  task.dialogLog.push({ ts: new Date().toISOString(), ...entry })
   _save()
 }
 
@@ -266,4 +287,7 @@ module.exports = {
   markInterrupted,
   elapsedMinutes,
   statusEmoji,
+  setLiveView,
+  appendDialogLog,
+  listAll,
 }

@@ -8,6 +8,18 @@ const customAgentManager   = require('../utils/customAgentManager')
 
 const MAX_COORDINATOR_RETRIES = 1
 
+// ─── Live dialog logger ────────────────────────────────────────────────────────
+
+async function dialogLog(taskId, telegram, entry) {
+  taskManager.appendDialogLog(taskId, entry)
+  const task = taskManager.get(taskId)
+  if (!task?.liveView) return
+  const icon = entry.role === 'coordinator' ? '🧠' : entry.role === 'reviewer' ? '🔍' : '👷'
+  const header = `${icon} *${entry.agentName}*`
+  const body = entry.body ? `\n${entry.body.slice(0, 600)}${entry.body.length > 600 ? '\n_…_' : ''}` : ''
+  await notify(telegram, task.notifyChatId, `${header}${body}`)
+}
+
 // ─── Prompt builders ───────────────────────────────────────────────────────────
 
 function buildCoordinatorPrompt(team, task) {
@@ -181,9 +193,15 @@ async function runTask(taskId, telegram) {
     }
 
     taskManager.setCoordinatorDecision(taskId, coordResult.assignTo, coordResult.instruction)
-    taskManager.transition(taskId, 'in_progress', { by: team.coordinator })
+    taskManager.transition(taskId, 'assigned', { by: team.coordinator })
+    taskManager.transition(taskId, 'in_progress', { by: coordResult.assignTo })
 
     const assignedWorker = coordResult.assignTo
+    await dialogLog(taskId, telegram, {
+      role: 'coordinator',
+      agentName: workerName(team.coordinator),
+      body: `→ asigna a *${workerName(assignedWorker)}*\n_${coordResult.instruction}_`,
+    })
     await notify(telegram, task.notifyChatId,
       `📋 *[${team.name}]* ${workerName(team.coordinator)} asignó a *${workerName(assignedWorker)}*\n_#${task.id}: ${task.title}_`
     )
@@ -208,6 +226,11 @@ async function runTask(taskId, telegram) {
 
       taskManager.setWorkerOutput(taskId, workerOutput)
       taskManager.transition(taskId, 'in_review', { by: assignedWorker })
+      await dialogLog(taskId, telegram, {
+        role: 'worker',
+        agentName: workerName(assignedWorker),
+        body: workerOutput,
+      })
 
       // Review step
       if (team.reviewMode === 'none' || !team.reviewer) {
@@ -250,6 +273,11 @@ async function runTask(taskId, telegram) {
       }
 
       taskManager.setReviewDecision(taskId, reviewResult.decision, reviewResult.comment, team.reviewer)
+      await dialogLog(taskId, telegram, {
+        role: 'reviewer',
+        agentName: workerName(team.reviewer),
+        body: `${reviewResult.decision === 'approved' ? '✅ APROBADO' : '🔄 CAMBIOS'}: ${reviewResult.comment}`,
+      })
 
       if (reviewResult.decision === 'approved') {
         taskManager.transition(taskId, 'done', { by: team.reviewer })

@@ -233,6 +233,7 @@ async function routeWithRootAgent(prompt, session) {
  * @param {string}      agentId    Custom agent ID (without 'custom:' prefix)
  * @param {string}      rolePrompt The role-specific system prompt for this step
  * @param {AbortSignal} signal
+ * @param {string[]}    teamMcps   MCP server names from the team's defaultMcpServers (default: [])
  * @returns {Promise<string>}
  */
 async function dispatchWithRole(agentId, rolePrompt, signal) {
@@ -243,23 +244,19 @@ async function dispatchWithRole(agentId, rolePrompt, signal) {
 
   logger.info(`dispatchWithRole → ${agentId} (${def.cli}) prompt="${rolePrompt.slice(0, 60)}..."`)
 
-  // rolePrompt contains both the role context and the task — pass as the user message.
-  // No session history, no SOUL injection — pure role execution.
-  if (def.cli === 'claude') {
-    const flags = [
-      base.cli,
-      base.printFlag,
-      '--dangerously-skip-permissions',
-      '--no-session-persistence',
-      '--disable-slash-commands',
-      ...(process.env.CLAUDE_MODEL ? ['--model', process.env.CLAUDE_MODEL] : []),
-      rolePrompt,
-    ]
-    return runCLI(flags, undefined, signal)
-  } else {
-    const flags = [base.cli, base.printFlag, ...(base.extraFlags ?? []), rolePrompt]
-    return runCLI(flags, undefined, signal)
-  }
+  const flags = def.cli === 'claude'
+    ? [
+        base.cli,
+        base.printFlag,
+        '--dangerously-skip-permissions',
+        '--no-session-persistence',
+        '--disable-slash-commands',
+        ...(process.env.CLAUDE_MODEL ? ['--model', process.env.CLAUDE_MODEL] : []),
+        rolePrompt,
+      ]
+    : [base.cli, ...(base.extraFlags ?? []), base.printFlag, rolePrompt]
+
+  return runCLI(flags, undefined, signal)
 }
 
 // ─── Dispatch ──────────────────────────────────────────────────────────────────

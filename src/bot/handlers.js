@@ -21,6 +21,11 @@ const MAX_RESPONSE_LENGTH = parseInt(process.env.MAX_RESPONSE_LENGTH) || 4000
 // Regex to detect "@agentAlias task" at the start of a message
 const MENTION_RE = /^@(\w[\w-]*)\s+([\s\S]+)$/
 
+// Escape characters that break Telegram Markdown V1
+function escapeMd(text) {
+  return String(text).replace(/[_*`[]/g, '\\$&')
+}
+
 // ─── Vibe phrases (shown while agent is thinking > 60s) ────────────────────────
 
 const VIBE_PHRASES = [
@@ -228,7 +233,7 @@ async function handleListAgents(ctx) {
   if (customAgents.length > 0) {
     const customLines = customAgents.map((a) => {
       const active = session.agent === `custom:${a.id}` ? ' ← activo' : ''
-      return `${a.emoji} *${a.name}*${active}\n  @${a.id} — ${a.description}`
+      return `${a.emoji} *${a.name}*${active} _(${a.cli ?? 'claude'})_\n  @${a.id} — ${a.description}`
     })
     text += `\n\n── *Custom Agents* ──\n\n${customLines.join('\n\n')}`
 
@@ -538,18 +543,60 @@ async function handleAuto(ctx) {
   const routeMsg = await ctx.reply('🧠 Analizando qué agente es mejor para esto...').catch(() => null)
 
   const selectedId = await routeWithRootAgent(text, session)
-
   if (routeMsg) await ctx.telegram.deleteMessage(ctx.chat.id, routeMsg.message_id).catch(() => {})
 
   if (!selectedId) {
-    // Fallback to active session agent
     ctx.message.text = text
     return handleTask(ctx)
   }
 
-  const agentDef = customAgentManager.get(selectedId)
-  await ctx.reply(`🧠 → *${agentDef.emoji} ${agentDef.name}*`, { parse_mode: 'Markdown' })
+  if (typeof selectedId === 'object') {
+    if (selectedId.type === 'team') {
+      const team = teamManager.get(selectedId.teamId)
+      if (team) {
+        const task = taskManager.create(team.id, text, String(userId), ctx.chat.id)
+        await ctx.reply(`🧠 → Equipo *${team.name}*\n✅ *Tarea #${task.id}* creada: _${task.title}_`, {
+          parse_mode: 'Markdown',
+          reply_markup: { inline_keyboard: [[
+            { text: '👁 Ver diálogo interno', callback_data: `team_liveview_on:${task.id}` },
+            { text: '❌ Cancelar', callback_data: `team_task_cancel:${task.id}` },
+          ]]},
+        })
+        if (team.heartbeatIntervalMin > 0) {
+          heartbeatManager.start(task.id, ctx.chat.id, team.id, team.heartbeatIntervalMin, ctx.telegram)
+        }
+        teamWorkflow.runTask(task.id, ctx.telegram).catch(err => logger.error(`/auto team error: ${err.message}`))
+        return
+      }
+    } else if (selectedId.type === 'ambos') {
+      const team = teamManager.get(selectedId.teamId)
+      const agentDef = customAgentManager.get(selectedId.agentId)
+      if (team && agentDef) {
+        session.pendingAutoRoutePrompt  = text
+        session.pendingAutoRouteTeamId  = selectedId.teamId
+        session.pendingAutoRouteAgentId = selectedId.agentId
+        await ctx.reply(
+          `🧠 Podría ir para dos lados. ¿Cómo querés resolver esto?\n\n` +
+          `*${agentDef.emoji} ${agentDef.name}* — respuesta rápida\n` +
+          `*${team.name}* — flujo completo de equipo`,
+          {
+            parse_mode: 'Markdown',
+            reply_markup: { inline_keyboard: [[
+              { text: `${agentDef.emoji} Agente`, callback_data: `setagent:${selectedId.agentId}` },
+              { text: `👥 Equipo`, callback_data: `autoroute_team:${selectedId.teamId}` },
+            ]]},
+          }
+        )
+        return
+      }
+    }
+    ctx.message.text = text
+    return handleTask(ctx)
+  }
 
+  // selectedId is a string agent ID
+  const agentDef = customAgentManager.get(selectedId)
+  await ctx.reply(`🧠 → *${agentDef?.emoji ?? '🤖'} ${agentDef?.name ?? selectedId}*`, { parse_mode: 'Markdown' })
   ctx.message.text = `@${selectedId} ${text}`
   return handleTask(ctx)
 }
@@ -562,12 +609,13 @@ async function handleAutoMode(ctx) {
 
   if (arg === 'on') {
     const agents = customAgentManager.list()
-    if (agents.length === 0) {
-      await ctx.reply('⚠️ No tenés custom agents. Creá uno con /newagent antes de activar el modo automático.')
+    const teams  = teamManager.list()
+    if (agents.length === 0 && teams.length === 0) {
+      await ctx.reply('⚠️ No tenés agentes ni equipos. Creá uno con /newagent o /buildteam antes de activar el modo automático.')
       return
     }
     sessionManager.setAutoMode(userId, true)
-    await ctx.reply('🧠 *autoMode ON* — De ahora en adelante elijo el mejor agente para cada tarea.', { parse_mode: 'Markdown' })
+    await ctx.reply('🧠 *autoMode ON* — De ahora en adelante elijo el mejor agente o equipo para cada tarea.', { parse_mode: 'Markdown' })
   } else if (arg === 'off') {
     sessionManager.setAutoMode(userId, false)
     await ctx.reply('🔒 *autoMode OFF* — Volvés al agente activo de sesión.', { parse_mode: 'Markdown' })
@@ -587,22 +635,9 @@ async function handleNewAgentCliSelect(ctx, cli) {
     return
   }
   const { answers } = session.newAgentFlow
-  session.newAgentFlow = null
-  try {
-    const agent = customAgentManager.create({ ...answers, cli })
-    const longPrompt = agent.systemPrompt.length > 8000
-    await ctx.editMessageText(
-      `✅ Agente *${agent.emoji} ${agent.name}* creado.` +
-      (longPrompt ? '\n⚠️ El system prompt es muy largo (>8000 chars) — puede truncarse.' : '') +
-      `\n\nUsalo con \`@${agent.id} <tarea>\``,
-      { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [] } }
-    ).catch(async () => {
-      await ctx.reply(`✅ Agente *${agent.emoji} ${agent.name}* creado. Usalo con \`@${agent.id} <tarea>\``, { parse_mode: 'Markdown' })
-    })
-  } catch (err) {
-    session.newAgentFlow = null
-    await ctx.editMessageText(`❌ ${err.message}`).catch(() => ctx.reply(`❌ ${err.message}`))
-  }
+  answers.cli = cli
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {})
+  await _saveNewAgent(ctx, session)
 }
 
 async function handleNewAgentVoiceLangSelect(ctx, langIdxStr) {
@@ -646,6 +681,23 @@ async function handleNewAgentVoiceSelect(ctx, voiceName) {
   }).catch(async () => {
     await ctx.reply('¿Qué CLI usás como motor?', { reply_markup: { inline_keyboard: [buttons] } })
   })
+}
+
+async function _saveNewAgent(ctx, session) {
+  const { answers } = session.newAgentFlow
+  session.newAgentFlow = null
+  try {
+    const agent = customAgentManager.create(answers)
+    const longPrompt = agent.systemPrompt.length > 8000
+    await ctx.reply(
+      `✅ Agente *${agent.emoji} ${agent.name}* creado.` +
+      (longPrompt ? '\n⚠️ El system prompt es muy largo (>8000 chars) — puede truncarse.' : '') +
+      `\n\nUsalo con \`@${agent.id} <tarea>\``,
+      { parse_mode: 'Markdown' }
+    )
+  } catch (err) {
+    await ctx.reply(`❌ ${err.message}`)
+  }
 }
 
 // ─── Inline keyboard callbacks — delagent ──────────────────────────────────────
@@ -769,6 +821,8 @@ function buildVoiceKeyboard(langIdx, cbPrefix, backCb) {
   }))
   return { inline_keyboard: [voiceRow, [{ text: '← Volver', callback_data: backCb }]] }
 }
+
+// ─── MCP keyboard helper ────────────────────────────────────────────────────────
 
 // ─── TTS helpers & handlers ────────────────────────────────────────────────────
 
@@ -1036,6 +1090,30 @@ async function handleTask(ctx, forcedText) {
       agentKey = resolved
       prompt = match[2].trim()
       logger.debug(`Mention resolved: @${alias} → ${resolved}`)
+    } else {
+      // Check if it's a team
+      const team = teamManager.get(alias)
+      if (team) {
+        const taskDesc = match[2].trim()
+        const task = taskManager.create(team.id, taskDesc, String(userId), ctx.chat.id)
+        await ctx.reply(
+          `👥 *${team.name}*\n✅ Tarea *#${task.id}* iniciada: _${task.title}_`,
+          { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[
+            { text: '👁 Ver diálogo interno', callback_data: `team_liveview_on:${task.id}` },
+            { text: '❌ Cancelar', callback_data: `team_task_cancel:${task.id}` },
+          ]]}}
+        )
+        if (team.heartbeatIntervalMin > 0) {
+          heartbeatManager.start(task.id, ctx.chat.id, team.id, team.heartbeatIntervalMin, ctx.telegram)
+        }
+        teamWorkflow.runTask(task.id, ctx.telegram).catch(err =>
+          logger.error(`@mention team dispatch error: ${err.message}`)
+        )
+        return
+      }
+      // Unknown alias
+      await ctx.reply(`❌ No encontré un agente ni equipo con el ID \`${alias}\`.`, { parse_mode: 'Markdown' })
+      return
     }
   }
 
@@ -1058,7 +1136,10 @@ async function handleTask(ctx, forcedText) {
             const task = taskManager.create(team.id, prompt, String(userId), ctx.chat.id)
             await ctx.reply(
               `🧠 → Equipo *${team.name}*\n✅ *Tarea #${task.id}* creada: _${task.title}_`,
-              { parse_mode: 'Markdown' }
+              { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[
+                { text: '👁 Ver diálogo interno', callback_data: `team_liveview_on:${task.id}` },
+                { text: '❌ Cancelar', callback_data: `team_task_cancel:${task.id}` },
+              ]]}}
             )
             if (team.heartbeatIntervalMin > 0) {
               heartbeatManager.start(task.id, ctx.chat.id, team.id, team.heartbeatIntervalMin, ctx.telegram)
@@ -1693,7 +1774,8 @@ async function handleListTeams(ctx) {
       `🎯 Coordinator: \`${t.coordinator}\`\n` +
       `👷 Workers: \`${workers}\`\n` +
       (reviewer ? reviewer + '\n' : '') +
-      `🔁 Review: ${t.reviewMode} | ⏱ Heartbeat: ${t.heartbeatIntervalMin}min`
+      `🔁 Review: ${t.reviewMode} | ⏱ Heartbeat: ${t.heartbeatIntervalMin}min\n` +
+      `💬 Usá: \`@${t.id} <tarea>\` o \`/task ${t.id} <tarea>\``
     )
   })
   await ctx.reply(`👥 *Equipos (${teams.length})*\n\n${lines.join('\n\n')}`, { parse_mode: 'Markdown' })
@@ -1764,10 +1846,15 @@ async function handleCreateTask(ctx) {
     {
       parse_mode: 'Markdown',
       reply_markup: {
-        inline_keyboard: [[
-          { text: '📋 Ver estado', callback_data: `team_task_detail:${task.id}` },
-          { text: '❌ Cancelar',   callback_data: `team_task_cancel:${task.id}` },
-        ]],
+        inline_keyboard: [
+          [
+            { text: '📋 Ver estado',  callback_data: `team_task_detail:${task.id}` },
+            { text: '❌ Cancelar',    callback_data: `team_task_cancel:${task.id}` },
+          ],
+          [
+            { text: '👁 Ver diálogo interno', callback_data: `team_liveview_on:${task.id}` },
+          ],
+        ],
       },
     }
   )
@@ -1785,30 +1872,56 @@ async function handleCreateTask(ctx) {
 
 async function handleListTasks(ctx) {
   const parts = ctx.message.text.trim().split(/\s+/)
-  const teamId = parts[1] ?? null
+  const arg = parts[1] ?? null
+  const showAll = arg === 'all' || arg === 'todas'
+  const teamId = (!showAll && arg) ? arg : null
 
   let tasks
   if (teamId) {
     const team = teamManager.get(teamId)
     if (!team) return ctx.reply(`❌ Team \`${teamId}\` no encontrado.`, { parse_mode: 'Markdown' })
-    tasks = taskManager.listByTeam(teamId)
+    tasks = taskManager.listAll(teamId)
+  } else if (showAll) {
+    tasks = taskManager.listAll()
   } else {
     tasks = [...taskManager.listActive(), ...taskManager.listCompletedToday()]
       .filter((t, i, arr) => arr.findIndex(x => x.id === t.id) === i)
   }
 
   if (tasks.length === 0) {
-    return ctx.reply(teamId ? `No hay tareas para el equipo \`${teamId}\`.` : 'No hay tareas activas ni completadas hoy.', { parse_mode: 'Markdown' })
+    return ctx.reply(
+      teamId ? `No hay tareas para el equipo \`${teamId}\`.` : 'No hay tareas registradas.',
+      { parse_mode: 'Markdown' }
+    )
   }
 
-  const lines = tasks.map(t => {
-    const elapsed = taskManager.elapsedMinutes(t)
-    const time    = elapsed > 0 ? ` ⏱ ${elapsed}min` : ''
-    return `${taskManager.statusEmoji(t.status)} \`#${t.id}\` ${t.title}${time}`
-  })
+  // Group by status
+  const groups = {
+    active:      tasks.filter(t => ['pending','assigned','in_progress','in_review','awaiting_user_review','changes_requested'].includes(t.status)),
+    done:        tasks.filter(t => t.status === 'done'),
+    failed:      tasks.filter(t => ['failed','interrupted','cancelled'].includes(t.status)),
+  }
 
-  const header = teamId ? `📋 *Tareas — ${teamManager.get(teamId)?.name ?? teamId}*` : `📋 *Tareas activas*`
-  await ctx.reply(`${header}\n\n${lines.join('\n')}`, { parse_mode: 'Markdown' })
+  function formatTask(t) {
+    const elapsed = taskManager.elapsedMinutes(t)
+    const time = elapsed > 0 ? ` ⏱ ${elapsed}min` : ''
+    const team = !teamId ? ` _[${teamManager.get(t.teamId)?.name ?? t.teamId}]_` : ''
+    return `${taskManager.statusEmoji(t.status)} \`#${t.id}\`${team} ${escapeMd(t.title)}${time}`
+  }
+
+  let text = teamId
+    ? `📋 *Tareas — ${escapeMd(teamManager.get(teamId)?.name ?? teamId)}*`
+    : showAll ? `📋 *Todas las tareas*` : `📋 *Tareas activas*`
+
+  if (groups.active.length)  text += `\n\n*En curso:*\n` + groups.active.map(formatTask).join('\n')
+  if (groups.done.length)    text += `\n\n*Completadas:*\n` + groups.done.map(formatTask).join('\n')
+  if (groups.failed.length)  text += `\n\n*Fallidas / canceladas:*\n` + groups.failed.map(formatTask).join('\n')
+
+  if (!showAll && !teamId) {
+    text += `\n\n_Usá \`/tasks all\` para ver todo el historial._`
+  }
+
+  await ctx.reply(text, { parse_mode: 'Markdown' })
 }
 
 async function handleTaskStatus(ctx) {
@@ -1940,10 +2053,35 @@ async function handleTeamCallback(ctx, data) {
     const taskId = data.split(':')[1].toUpperCase()
     const task = taskManager.get(taskId)
     if (!task) { await ctx.answerCbQuery('Tarea no encontrada'); return true }
-    const output = task.output ?? '_(sin output todavía)_'
-    const preview = output.slice(0, 1500) + (output.length > 1500 ? '\n_(truncado)_' : '')
-    await ctx.reply(`📋 *Output de #${taskId}*\n\n${preview}`, { parse_mode: 'Markdown' })
+    const raw = task.output ?? null
+    if (!raw) {
+      await ctx.reply(`📋 *#${taskId}* — sin output todavía.`, { parse_mode: 'Markdown' })
+    } else {
+      const preview = raw.slice(0, 3800) + (raw.length > 3800 ? '\n…' : '')
+      await ctx.reply(`📋 *Output de #${taskId}*\n\n${escapeMd(preview)}`, { parse_mode: 'Markdown' })
+    }
     await ctx.answerCbQuery()
+    return true
+  }
+
+  // team_liveview_on:<taskId>
+  if (data.startsWith('team_liveview_on:')) {
+    const taskId = data.split(':')[1].toUpperCase()
+    const task = taskManager.get(taskId)
+    if (!task) { await ctx.answerCbQuery('Tarea no encontrada'); return true }
+    taskManager.setLiveView(taskId, true)
+    await ctx.answerCbQuery('👁 Diálogo activado')
+    // If there are already entries in the log, show them
+    const log = task.dialogLog ?? []
+    if (log.length > 0) {
+      const lines = log.map(e => {
+        const icon = e.role === 'coordinator' ? '🧠' : e.role === 'reviewer' ? '🔍' : '👷'
+        return `${icon} *${escapeMd(e.agentName)}*\n${escapeMd((e.body ?? '').slice(0, 300))}`
+      }).join('\n\n')
+      await ctx.reply(`🖥 *Diálogo #${taskId}* (hasta ahora)\n\n${lines}`, { parse_mode: 'Markdown' })
+    } else {
+      await ctx.reply(`👁 *Diálogo #${taskId}* activado — verás cada paso a medida que ocurra.`, { parse_mode: 'Markdown' })
+    }
     return true
   }
 

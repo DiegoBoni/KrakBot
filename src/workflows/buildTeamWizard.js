@@ -33,7 +33,15 @@ const DOMAINS = [
   { id: 'custom',         label: '🔧 Personalizado ✏️' },
 ]
 
-// ─── Keyboard builder ──────────────────────────────────────────────────────────
+// ─── Keyboard builders ─────────────────────────────────────────────────────────
+
+function buildModelKeyboard() {
+  const cliStatus = global.__cliStatus ?? {}
+  const buttons = ['claude', 'gemini', 'codex']
+    .filter(c => cliStatus[c]?.found !== false)
+    .map(c => ({ text: `✅ ${c}`, callback_data: `buildteam_model:${c}` }))
+  return { inline_keyboard: [buttons] }
+}
 
 function buildDomainKeyboard() {
   const buttons = DOMAINS.map(d => ({ text: d.label, callback_data: `buildteam_domain:${d.id}` }))
@@ -315,11 +323,65 @@ async function handleConfirm(ctx) {
     return
   }
 
+  _refreshTtl(session)
+
+  // Go straight to per-agent model selection
+  session.buildTeamFlow.step         = 'select_model_per_agent'
+  session.buildTeamFlow.perAgentClis = {}
+  session.buildTeamFlow.pendingAgentQueue = [
+    rec.coordinator.name,
+    ...rec.workers.map(w => w.name),
+    ...(rec.reviewer ? [rec.reviewer.name] : []),
+  ]
+  session.buildTeamFlow.currentAgentIdx = 0
+
+  return _promptNextAgentModel(ctx)
+}
+
+async function handleModelSelected(ctx, choice) {
+  const session = sessionManager.getOrCreate(ctx.from.id)
+  if (!checkTtl(session)) {
+    await ctx.reply('El wizard expiró. Escribí /buildteam para empezar de nuevo.')
+    return
+  }
+  const flow = session.buildTeamFlow
+  if (!flow || flow.step !== 'select_model_per_agent') return
+  _refreshTtl(session)
+
+  const agentName = flow.pendingAgentQueue[flow.currentAgentIdx]
+  if (agentName) {
+    flow.perAgentClis[agentName] = choice
+    flow.currentAgentIdx++
+  }
+  return _promptNextAgentModel(ctx)
+}
+
+async function _promptNextAgentModel(ctx) {
+  const session = sessionManager.getOrCreate(ctx.from.id)
+  const flow = session.buildTeamFlow
+  const agentName = flow.pendingAgentQueue[flow.currentAgentIdx]
+  if (!agentName) {
+    flow.step = 'select_model'
+    return _commitTeam(ctx)
+  }
+  await ctx.reply(
+    `🤖 Modelo para *${agentName}*:`,
+    { parse_mode: 'Markdown', reply_markup: buildModelKeyboard() }
+  )
+}
+
+async function _commitTeam(ctx) {
+  const session = sessionManager.getOrCreate(ctx.from.id)
+  const flow = session.buildTeamFlow
+  const rec = flow.recommendation
+
+  function resolveCli(agentName) {
+    return flow.perAgentClis?.[agentName] ?? flow.selectedCli ?? 'claude'
+  }
+
   const creating = await ctx.reply('⚙️ Creando agentes y equipo...').catch(() => null)
 
   try {
-    const defaultCli = 'claude'
-
     // Create coordinator if not exists
     const coordId = customAgentManager.generateId(rec.coordinator.name)
     if (!customAgentManager.exists(coordId)) {
@@ -327,7 +389,7 @@ async function handleConfirm(ctx) {
         name:         rec.coordinator.name,
         description:  rec.coordinator.description,
         systemPrompt: rec.coordinator.systemPrompt,
-        cli:          defaultCli,
+        cli:          resolveCli(rec.coordinator.name),
       })
     }
 
@@ -340,7 +402,7 @@ async function handleConfirm(ctx) {
           name:         w.name,
           description:  w.description,
           systemPrompt: w.systemPrompt,
-          cli:          defaultCli,
+          cli:          resolveCli(w.name),
         })
       }
       workerIds.push(wId)
@@ -355,7 +417,7 @@ async function handleConfirm(ctx) {
           name:         rec.reviewer.name,
           description:  rec.reviewer.description,
           systemPrompt: rec.reviewer.systemPrompt,
-          cli:          defaultCli,
+          cli:          resolveCli(rec.reviewer.name),
         })
       }
     }
@@ -374,15 +436,26 @@ async function handleConfirm(ctx) {
     delete session.buildTeamFlow
     if (creating) await ctx.telegram.deleteMessage(ctx.chat.id, creating.message_id).catch(() => {})
 
-    const workerList = workerIds.join(', ')
+    // Build summary lines
+    const allAgents = [
+      { def: rec.coordinator, id: coordId, role: '🎯' },
+      ...rec.workers.map((w, i) => ({ def: w, id: workerIds[i], role: '👷' })),
+      ...(rec.reviewer ? [{ def: rec.reviewer, id: reviewerId, role: '✅' }] : []),
+    ]
+    const agentLines = allAgents.map(({ def, id, role }) => {
+      const cli = resolveCli(def.name)
+      return `${role} \`${id}\` → ${cli}`
+    }).join('\n')
+
     await ctx.reply(
-      `✅ *Equipo "${team.name}" creado* con ${workerIds.length + 1 + (reviewerId ? 1 : 0)} agentes.\n\n` +
+      `✅ *Equipo "${team.name}" creado* con ${allAgents.length} agentes.\n\n` +
+      `${agentLines}\n\n` +
       `Usá:\n\`/task ${team.id} descripción de la tarea\`\npara empezar a trabajar.`,
       { parse_mode: 'Markdown' }
     )
-    logger.info(`buildTeamWizard: team "${team.id}" created with workers: ${workerList}`)
+    logger.info(`buildTeamWizard: team "${team.id}" created — cli=${flow.selectedCli ?? 'per-agent'}`)
   } catch (err) {
-    logger.error(`buildTeamWizard: confirm failed — ${err.message}`)
+    logger.error(`buildTeamWizard: commit failed — ${err.message}`)
     if (creating) await ctx.telegram.deleteMessage(ctx.chat.id, creating.message_id).catch(() => {})
     await ctx.reply(`❌ Error creando el equipo: ${err.message}`)
     delete session.buildTeamFlow
@@ -416,6 +489,12 @@ async function handleTextIfActive(ctx) {
     return true
   }
 
+  // select_model_per_agent — user must press a button
+  if (flow.step === 'select_model_per_agent') {
+    await ctx.reply('Tocá uno de los botones de arriba para continuar.')
+    return true
+  }
+
   return false
 }
 
@@ -427,6 +506,7 @@ module.exports = {
   handleCustomize,
   handleCustomizeInput,
   handleConfirm,
+  handleModelSelected,
   handleTextIfActive,
   checkTtl,
 }
