@@ -46,17 +46,45 @@ const {
   handleEditAgentFieldSelect,
   handleEditAgentCliValSelect,
   handleEditAgentCancel,
+  // Agent inline callbacks (Phase 1)
+  handleAgentActivate,
+  handleAgentEditFromButton,
+  handleAgentDeletePrompt,
+  handleAgentDeleteConfirm,
+  handleAgentListRefresh,
+  handleAgentNew,
+  // Soul inline callbacks (Phase 2)
+  handleSoulEdit,
+  handleSoulReload,
+  // Memory inline callbacks (Phase 3)
+  handleMemoryForget,
+  handleMemoriesPage,
   // Teams
   handleBuildTeam,
   handleListTeams,
   handleDelTeam,
   handleEditTeam,
+  // Team inline callbacks (Phase 4)
+  handleTeamDetailBtn,
+  handleTeamEditBtn,
+  handleTeamDeleteBtn,
+  handleTeamDeleteConfirmBtn,
+  handleTeamListRefresh,
+  handleTeamNewBtn,
   // Tasks
   handleCreateTask,
   handleListTasks,
   handleTaskStatus,
   handleCancelTask,
   handleTeamStatus,
+  // Task inline callbacks (Phase 5)
+  handleTaskDetail,
+  handleTaskCancelPrompt,
+  handleTaskCancelConfirm,
+  handleTasksHistory,
+  handleTasksPage,
+  // Generic
+  handleActionCancel,
   // Team callbacks + feedback
   handleTeamCallback,
   handlePendingReviewFeedback,
@@ -248,6 +276,107 @@ function createBot() {
     await handleSetAgent(ctx, `custom:${ctx.match[1]}`)
   })
 
+  // ─── Phase 1: Agent inline callbacks ───────────────────────────────────────
+
+  // agent_activate: supports both built-in keys and "custom:id" form
+  bot.action(/^agent_activate:(.+)$/, async (ctx) => {
+    await handleAgentActivate(ctx, ctx.match[1])
+  })
+
+  bot.action(/^agent_edit:(.+)$/, async (ctx) => {
+    await handleAgentEditFromButton(ctx, ctx.match[1])
+  })
+
+  bot.action(/^agent_delete:(.+)$/, async (ctx) => {
+    await handleAgentDeletePrompt(ctx, ctx.match[1])
+  })
+
+  bot.action(/^agent_delete_confirm:(.+)$/, async (ctx) => {
+    await handleAgentDeleteConfirm(ctx, ctx.match[1])
+  })
+
+  bot.action('agent_list_refresh', async (ctx) => {
+    await handleAgentListRefresh(ctx)
+  })
+
+  bot.action('agent_new', async (ctx) => {
+    await handleAgentNew(ctx)
+  })
+
+  // ─── Phase 2: Soul inline callbacks ────────────────────────────────────────
+
+  bot.action('soul_edit', async (ctx) => {
+    await handleSoulEdit(ctx)
+  })
+
+  bot.action('soul_reload', async (ctx) => {
+    await handleSoulReload(ctx)
+  })
+
+  // ─── Phase 3: Memory inline callbacks ──────────────────────────────────────
+
+  bot.action(/^memory_forget:(.+)$/, async (ctx) => {
+    await handleMemoryForget(ctx, ctx.match[1])
+  })
+
+  bot.action(/^memories_page:(\d+)$/, async (ctx) => {
+    await handleMemoriesPage(ctx, ctx.match[1])
+  })
+
+  // ─── Phase 4: Team inline callbacks (non-workflow) ─────────────────────────
+
+  bot.action(/^team_detail:(.+)$/, async (ctx) => {
+    await handleTeamDetailBtn(ctx, ctx.match[1])
+  })
+
+  bot.action(/^team_edit_btn:(.+)$/, async (ctx) => {
+    await handleTeamEditBtn(ctx, ctx.match[1])
+  })
+
+  bot.action(/^team_delete_btn:(.+)$/, async (ctx) => {
+    await handleTeamDeleteBtn(ctx, ctx.match[1])
+  })
+
+  bot.action(/^team_delete_confirm:(.+)$/, async (ctx) => {
+    await handleTeamDeleteConfirmBtn(ctx, ctx.match[1])
+  })
+
+  bot.action('team_list_refresh', async (ctx) => {
+    await handleTeamListRefresh(ctx)
+  })
+
+  bot.action('team_new', async (ctx) => {
+    await handleTeamNewBtn(ctx)
+  })
+
+  // ─── Phase 5: Task inline callbacks ────────────────────────────────────────
+
+  bot.action(/^task_detail:(.+)$/, async (ctx) => {
+    await handleTaskDetail(ctx, ctx.match[1])
+  })
+
+  bot.action(/^task_cancel:(.+)$/, async (ctx) => {
+    await handleTaskCancelPrompt(ctx, ctx.match[1])
+  })
+
+  bot.action(/^task_cancel_confirm:(.+)$/, async (ctx) => {
+    await handleTaskCancelConfirm(ctx, ctx.match[1])
+  })
+
+  bot.action('tasks_history', async (ctx) => {
+    await handleTasksHistory(ctx)
+  })
+
+  bot.action(/^tasks_page:(\d+)$/, async (ctx) => {
+    await handleTasksPage(ctx, ctx.match[1])
+  })
+
+  // ─── Generic ───────────────────────────────────────────────────────────────
+
+  bot.action('action_cancel', async (ctx) => {
+    await handleActionCancel(ctx)
+  })
+
   // buildteam: model selection
   bot.action(/^buildteam_model:(.+)$/, async (ctx) => {
     await ctx.answerCbQuery().catch(() => {})
@@ -255,8 +384,11 @@ function createBot() {
   })
 
   // Team workflow callbacks (catch-all for team_* and buildteam_* prefixes)
+  // Skip callbacks that are handled by the specific Phase 4 actions above
+  const INLINE_TEAM_PREFIXES = ['team_detail:', 'team_edit_btn:', 'team_delete_btn:', 'team_delete_confirm:', 'team_list_refresh', 'team_new']
   bot.action(/^(team_|buildteam_|autoroute_team:)/, async (ctx) => {
     const data = ctx.callbackQuery?.data ?? ''
+    if (INLINE_TEAM_PREFIXES.some(p => data === p || data.startsWith(p + ':'))) return
     const handled = await handleTeamCallback(ctx, data).catch(err => {
       logger.error(`handleTeamCallback error: ${err.message}`)
       return false

@@ -214,38 +214,161 @@ async function handleHelp(ctx) {
   )
 }
 
-async function handleListAgents(ctx) {
-  const session = sessionManager.getOrCreate(ctx.from.id)
+// ─── Agents list helpers ───────────────────────────────────────────────────────
+
+function buildAgentsMessage(userId) {
+  const session = sessionManager.getOrCreate(userId)
   const agents = listAgents()
 
   const lines = agents.map((a) => {
-    const active  = a.key === session.agent ? ' ← activo' : ''
-    const cliOk   = global.__cliStatus?.[a.key]?.found !== false
-    const badge   = cliOk ? '' : ' ⚠️ CLI no encontrado'
-    return `${a.emoji} *${a.name}*${active}${badge}\n  /${a.key} — ${a.description}`
+    const active = a.key === session.agent ? ' ✅ *activo*' : ''
+    const cliOk  = global.__cliStatus?.[a.key]?.found !== false
+    const badge  = cliOk ? '' : ' ⚠️'
+    return `${a.emoji} *${a.name}*${active}${badge} — ${escapeMd(a.description)}`
   })
 
-  let text = `🤖 *Agentes disponibles:*\n\n${lines.join('\n\n')}`
+  let text = `🤖 *Agentes disponibles:*\n\n${lines.join('\n')}`
 
   const customAgents = customAgentManager.list()
-  const keyboard = []
-
   if (customAgents.length > 0) {
     const customLines = customAgents.map((a) => {
-      const active = session.agent === `custom:${a.id}` ? ' ← activo' : ''
-      return `${a.emoji} *${a.name}*${active} _(${a.cli ?? 'claude'})_\n  @${a.id} — ${a.description}`
+      const active = session.agent === `custom:${a.id}` ? ' ✅ *activo*' : ''
+      return `${a.emoji} *${escapeMd(a.name)}*${active} _(${a.cli ?? 'claude'})_ — ${escapeMd(a.description)}`
     })
-    text += `\n\n── *Custom Agents* ──\n\n${customLines.join('\n\n')}`
-
-    for (const a of customAgents) {
-      keyboard.push([{ text: `${a.emoji} Activar ${a.name}`, callback_data: `setagent:${a.id}` }])
-    }
+    text += `\n\n── *Custom Agents* ──\n\n${customLines.join('\n')}`
   }
 
-  await ctx.reply(text, {
-    parse_mode: 'Markdown',
-    reply_markup: keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined,
-  })
+  return text
+}
+
+function buildAgentsKeyboard(userId) {
+  const session = sessionManager.getOrCreate(userId)
+  const agents = listAgents()
+  const keyboard = []
+
+  // Built-in agents
+  for (const a of agents) {
+    const isActive = a.key === session.agent
+    const row = []
+    if (!isActive) row.push({ text: `✅ Activar ${a.emoji} ${a.name}`, callback_data: `agent_activate:${a.key}` })
+    if (row.length > 0) keyboard.push(row)
+  }
+
+  // Custom agents
+  const customAgents = customAgentManager.list()
+  for (const a of customAgents) {
+    const isActive = session.agent === `custom:${a.id}`
+    const row = []
+    if (!isActive) row.push({ text: `✅ Activar`, callback_data: `agent_activate:custom:${a.id}` })
+    row.push({ text: `✏️ Editar`, callback_data: `agent_edit:${a.id}` })
+    row.push({ text: `🗑 Borrar`, callback_data: `agent_delete:${a.id}` })
+    keyboard.push(row)
+  }
+
+  // Last row
+  keyboard.push([{ text: '➕ Nuevo agente', callback_data: 'agent_new' }])
+
+  return { inline_keyboard: keyboard }
+}
+
+async function handleListAgents(ctx) {
+  const userId = ctx.from.id
+  const text = buildAgentsMessage(userId)
+  const keyboard = buildAgentsKeyboard(userId)
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard })
+}
+
+// ─── Agent inline callback handlers ───────────────────────────────────────────
+
+async function handleAgentActivate(ctx, agentKey) {
+  try {
+    await handleSetAgent(ctx, agentKey)
+  } catch (err) {
+    await ctx.answerCbQuery('❌ Error', { show_alert: true }).catch(() => {})
+    return
+  }
+  const userId = ctx.from.id
+  const newText = buildAgentsMessage(userId)
+  const newKeyboard = buildAgentsKeyboard(userId)
+  await ctx.editMessageText(newText, { parse_mode: 'Markdown', reply_markup: newKeyboard }).catch(() => {})
+  await ctx.answerCbQuery('✅ Agente activado').catch(() => {})
+}
+
+async function handleAgentEditFromButton(ctx, id) {
+  const agent = customAgentManager.get(id)
+  if (!agent) {
+    await ctx.answerCbQuery('❌ Agente no encontrado', { show_alert: true }).catch(() => {})
+    return
+  }
+  const session = sessionManager.getOrCreate(ctx.from.id)
+  session.editAgentFlow = { targetId: id, field: null }
+  await ctx.editMessageText(
+    `✏️ Editando *${agent.emoji} ${escapeMd(agent.name)}*\n¿Qué querés cambiar?`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '📝 Descripción',   callback_data: `editagent_desc:${id}` },
+          { text: '🧠 System Prompt', callback_data: `editagent_prompt:${id}` },
+          { text: '⚙️ CLI',           callback_data: `editagent_cli:${id}` },
+          { text: '🚫 Cancelar',      callback_data: 'agent_list_refresh' },
+        ]],
+      },
+    }
+  ).catch(() => {})
+  await ctx.answerCbQuery().catch(() => {})
+}
+
+async function handleAgentDeletePrompt(ctx, id) {
+  const agent = customAgentManager.get(id)
+  if (!agent) {
+    await ctx.answerCbQuery('❌ Agente no encontrado', { show_alert: true }).catch(() => {})
+    return
+  }
+  await ctx.editMessageText(
+    `⚠️ ¿Seguro que querés borrar *${agent.emoji} ${escapeMd(agent.name)}*?`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '✅ Sí, borrar', callback_data: `agent_delete_confirm:${id}` },
+          { text: '❌ Cancelar',   callback_data: 'agent_list_refresh' },
+        ]],
+      },
+    }
+  ).catch(() => {})
+  await ctx.answerCbQuery().catch(() => {})
+}
+
+async function handleAgentDeleteConfirm(ctx, id) {
+  const agent = customAgentManager.get(id)
+  if (!agent) {
+    await ctx.editMessageText('El agente ya no existe.').catch(() => {})
+    await ctx.answerCbQuery().catch(() => {})
+    return
+  }
+  customAgentManager.remove(id)
+  const session = sessionManager.getOrCreate(ctx.from.id)
+  if (session.agent === `custom:${id}`) {
+    sessionManager.setAgent(ctx.from.id, process.env.DEFAULT_AGENT || 'claude')
+  }
+  const newText = buildAgentsMessage(ctx.from.id)
+  const newKeyboard = buildAgentsKeyboard(ctx.from.id)
+  await ctx.editMessageText(newText, { parse_mode: 'Markdown', reply_markup: newKeyboard }).catch(() => {})
+  await ctx.answerCbQuery('🗑 Agente borrado').catch(() => {})
+}
+
+async function handleAgentListRefresh(ctx) {
+  const userId = ctx.from.id
+  const newText = buildAgentsMessage(userId)
+  const newKeyboard = buildAgentsKeyboard(userId)
+  await ctx.editMessageText(newText, { parse_mode: 'Markdown', reply_markup: newKeyboard }).catch(() => {})
+  await ctx.answerCbQuery().catch(() => {})
+}
+
+async function handleAgentNew(ctx) {
+  await ctx.answerCbQuery().catch(() => {})
+  await ctx.reply('Usá /newagent para crear un nuevo agente personalizado.')
 }
 
 async function handleSetAgent(ctx, agentKey) {
@@ -360,7 +483,7 @@ async function handleClearHistory(ctx) {
 
 async function handleSoul(ctx) {
   const userId = ctx.from.id
-  const parts = ctx.message.text.trim().split(/\s+/)
+  const parts = (ctx.message?.text ?? '').trim().split(/\s+/)
   const subcmd = parts[1]?.toLowerCase()
 
   if (subcmd === 'reset') {
@@ -389,8 +512,37 @@ async function handleSoul(ctx) {
   }
 
   const preview = soul.length > 3800 ? soul.slice(0, 3800) + '\n...(truncado)' : soul
-  await ctx.reply(`📄 *Mi alma actual:*\n\n\`\`\`\n${preview}\n\`\`\``, { parse_mode: 'Markdown' })
-    .catch(() => ctx.reply(`📄 Mi alma actual:\n\n${preview}`))
+  await ctx.reply(
+    `📄 *Mi alma actual:*\n\n\`\`\`\n${preview}\n\`\`\``,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '✏️ Editar soul',           callback_data: 'soul_edit' },
+          { text: '🔄 Recargar desde archivo', callback_data: 'soul_reload' },
+        ]],
+      },
+    }
+  ).catch(() => ctx.reply(`📄 Mi alma actual:\n\n${preview}`))
+}
+
+// ─── Soul inline callback handlers ────────────────────────────────────────────
+
+async function handleSoulEdit(ctx) {
+  const userId = ctx.from.id
+  const session = sessionManager.getOrCreate(userId)
+  session.editSoulFlow = true
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {})
+  await ctx.reply('✏️ Escribí el nuevo contenido para SOUL.md (se reemplazará por completo):')
+  await ctx.answerCbQuery().catch(() => {})
+}
+
+async function handleSoulReload(ctx) {
+  soulManager.reload()
+  const exists = soulManager.soulExists()
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {})
+  await ctx.reply(exists ? '🔄 SOUL.md recargado correctamente.' : '⚠️ SOUL.md no encontrado en disco.')
+  await ctx.answerCbQuery(exists ? '🔄 Recargado' : '⚠️ No encontrado').catch(() => {})
 }
 
 async function handleReloadSoul(ctx) {
@@ -426,7 +578,7 @@ async function handleRemember(ctx) {
 }
 
 async function handleMemories(ctx) {
-  const parts = ctx.message.text.trim().split(/\s+/)
+  const parts = (ctx.message?.text ?? '').trim().split(/\s+/)
   const page = parseInt(parts[1]) || 1
   const memories = await memoryManager.list(page, 10)
 
@@ -438,13 +590,82 @@ async function handleMemories(ctx) {
   const lines = memories.map((m, i) => {
     const idx = (page - 1) * 10 + i + 1
     const date = m.date ? m.date.slice(0, 10) : '?'
-    return `${idx}. [${date}] ${m.preview}`
+    return `${idx}\\. \\[${date}\\] ${escapeMd(m.preview)}`
   })
 
+  // Build keyboard: one delete button per memory
+  const keyboard = memories.map((m) => [
+    { text: `🗑 Borrar: ${m.preview.slice(0, 30)}…`, callback_data: `memory_forget:${m.id}` },
+  ])
+
+  // Pagination row
+  const paginationRow = []
+  if (page > 1) paginationRow.push({ text: '← Anterior', callback_data: `memories_page:${page - 1}` })
+  paginationRow.push({ text: `Página ${page + 1} →`, callback_data: `memories_page:${page + 1}` })
+  keyboard.push(paginationRow)
+
   await ctx.reply(
-    `🧠 *Memorias (página ${page}):*\n\n${lines.join('\n')}\n\nUsá \`/memories ${page + 1}\` para ver más.`,
-    { parse_mode: 'Markdown' }
-  ).catch(() => ctx.reply(`Memorias (página ${page}):\n\n${lines.join('\n')}`))
+    `🧠 *Memorias (página ${page}):*\n\n${lines.join('\n')}`,
+    { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
+  ).catch(() => ctx.reply(`Memorias (página ${page}):\n\n${memories.map((m, i) => `${(page-1)*10+i+1}. ${m.preview}`).join('\n')}`))
+}
+
+// ─── Memory inline callback handlers ──────────────────────────────────────────
+
+async function handleMemoryForget(ctx, memId) {
+  try {
+    const ok = await memoryManager.remove(memId)
+    if (!ok) {
+      await ctx.answerCbQuery('❌ Memoria no encontrada', { show_alert: true }).catch(() => {})
+      return
+    }
+    // Refresh memories list in same message if possible
+    const memories = await memoryManager.list(1, 10)
+    if (memories.length === 0) {
+      await ctx.editMessageText('🧠 No quedan memorias guardadas.').catch(() => {})
+      await ctx.answerCbQuery('🗑 Borrada').catch(() => {})
+      return
+    }
+    const lines = memories.map((m, i) => `${i + 1}\\. \\[${m.date ? m.date.slice(0,10) : '?'}\\] ${escapeMd(m.preview)}`)
+    const keyboard = memories.map((m) => [
+      { text: `🗑 Borrar: ${m.preview.slice(0, 30)}…`, callback_data: `memory_forget:${m.id}` },
+    ])
+    keyboard.push([{ text: 'Página 2 →', callback_data: 'memories_page:2' }])
+    await ctx.editMessageText(
+      `🧠 *Memorias (página 1):*\n\n${lines.join('\n')}`,
+      { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
+    ).catch(() => {})
+    await ctx.answerCbQuery('🗑 Memoria borrada').catch(() => {})
+  } catch (err) {
+    await ctx.answerCbQuery('❌ Error', { show_alert: true }).catch(() => {})
+  }
+}
+
+async function handleMemoriesPage(ctx, pageStr) {
+  const page = Math.max(1, parseInt(pageStr) || 1)
+  const memories = await memoryManager.list(page, 10)
+  if (memories.length === 0) {
+    await ctx.editMessageText(page > 1 ? 'No hay más memorias.' : 'No tenés memorias guardadas.').catch(() => {})
+    await ctx.answerCbQuery().catch(() => {})
+    return
+  }
+  const lines = memories.map((m, i) => {
+    const idx = (page - 1) * 10 + i + 1
+    const date = m.date ? m.date.slice(0, 10) : '?'
+    return `${idx}\\. \\[${date}\\] ${escapeMd(m.preview)}`
+  })
+  const keyboard = memories.map((m) => [
+    { text: `🗑 Borrar: ${m.preview.slice(0, 30)}…`, callback_data: `memory_forget:${m.id}` },
+  ])
+  const paginationRow = []
+  if (page > 1) paginationRow.push({ text: '← Anterior', callback_data: `memories_page:${page - 1}` })
+  paginationRow.push({ text: `Página ${page + 1} →`, callback_data: `memories_page:${page + 1}` })
+  keyboard.push(paginationRow)
+  await ctx.editMessageText(
+    `🧠 *Memorias (página ${page}):*\n\n${lines.join('\n')}`,
+    { parse_mode: 'MarkdownV2', reply_markup: { inline_keyboard: keyboard } }
+  ).catch(() => {})
+  await ctx.answerCbQuery().catch(() => {})
 }
 
 async function handleForget(ctx) {
@@ -1029,6 +1250,20 @@ async function handleTask(ctx, forcedText) {
     }
     // awaiting_voice / awaiting_cli — user must press a button
     await ctx.reply('Tocá uno de los botones de arriba, o enviá un comando para cancelar.')
+    return
+  }
+
+  // ─── editSoulFlow text step ────────────────────────────────────────────────
+
+  if (session.editSoulFlow) {
+    session.editSoulFlow = null
+    try {
+      await soulManager.writeSoul(text)
+      soulManager.reload()
+      await ctx.reply('✅ Soul actualizado y recargado.')
+    } catch (err) {
+      await ctx.reply(`❌ No se pudo guardar el soul: ${err.message.slice(0, 100)}`)
+    }
     return
   }
 
@@ -1760,25 +1995,154 @@ async function handleBuildTeam(ctx) {
   await buildTeamWizard.startWizard(ctx)
 }
 
+// ─── Teams list helpers ────────────────────────────────────────────────────────
+
+function buildTeamsMessage(teams) {
+  const lines = teams.map(t => {
+    const workers = t.workers.join(', ')
+    const reviewer = t.reviewer ? `✅ *Reviewer:* \`${escapeMd(t.reviewer)}\`` : ''
+    return (
+      `*${escapeMd(t.name)}* — \`${t.id}\`\n` +
+      `_${escapeMd(t.description)}_\n` +
+      `🎯 Coordinator: \`${escapeMd(t.coordinator)}\`\n` +
+      `👷 Workers: \`${escapeMd(workers)}\`\n` +
+      (reviewer ? reviewer + '\n' : '') +
+      `🔁 Review: ${t.reviewMode} | ⏱ Heartbeat: ${t.heartbeatIntervalMin}min`
+    )
+  })
+  return `👥 *Equipos (${teams.length})*\n\n${lines.join('\n\n')}`
+}
+
+function buildTeamsKeyboard(teams) {
+  const keyboard = []
+  for (const t of teams) {
+    keyboard.push([
+      { text: '📋 Detalle', callback_data: `team_detail:${t.id}` },
+      { text: '✏️ Editar',  callback_data: `team_edit_btn:${t.id}` },
+      { text: '🗑 Borrar',  callback_data: `team_delete_btn:${t.id}` },
+    ])
+  }
+  keyboard.push([{ text: '➕ Nuevo equipo', callback_data: 'team_new' }])
+  return { inline_keyboard: keyboard }
+}
+
 async function handleListTeams(ctx) {
   const teams = teamManager.list()
   if (teams.length === 0) {
     return ctx.reply('No hay equipos creados todavía. Usá /buildteam para crear uno.')
   }
-  const lines = teams.map(t => {
-    const workers = t.workers.join(', ')
-    const reviewer = t.reviewer ? `✅ *Reviewer:* \`${t.reviewer}\`` : ''
-    return (
-      `*${t.name}* — \`${t.id}\`\n` +
-      `_${t.description}_\n` +
-      `🎯 Coordinator: \`${t.coordinator}\`\n` +
-      `👷 Workers: \`${workers}\`\n` +
-      (reviewer ? reviewer + '\n' : '') +
-      `🔁 Review: ${t.reviewMode} | ⏱ Heartbeat: ${t.heartbeatIntervalMin}min\n` +
-      `💬 Usá: \`@${t.id} <tarea>\` o \`/task ${t.id} <tarea>\``
-    )
-  })
-  await ctx.reply(`👥 *Equipos (${teams.length})*\n\n${lines.join('\n\n')}`, { parse_mode: 'Markdown' })
+  const text = buildTeamsMessage(teams)
+  const keyboard = buildTeamsKeyboard(teams)
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard })
+}
+
+// ─── Teams inline callback handlers ───────────────────────────────────────────
+
+async function handleTeamDetailBtn(ctx, teamId) {
+  const team = teamManager.get(teamId)
+  if (!team) {
+    await ctx.answerCbQuery('❌ Equipo no encontrado', { show_alert: true }).catch(() => {})
+    return
+  }
+  const activeTasks = taskManager.listByTeam(teamId).filter(t =>
+    ['pending','assigned','in_progress','in_review','awaiting_user_review','changes_requested'].includes(t.status)
+  )
+  const workers = team.workers.join(', ')
+  const reviewer = team.reviewer ? `✅ Reviewer: \`${escapeMd(team.reviewer)}\`\n` : ''
+  let text =
+    `📋 *${escapeMd(team.name)}* — \`${team.id}\`\n` +
+    `_${escapeMd(team.description)}_\n\n` +
+    `🎯 Coordinator: \`${escapeMd(team.coordinator)}\`\n` +
+    `👷 Workers: \`${escapeMd(workers)}\`\n` +
+    reviewer +
+    `🔁 Review: ${team.reviewMode}\n` +
+    `⏱ Heartbeat: ${team.heartbeatIntervalMin}min\n` +
+    `🔢 Máx iteraciones: ${team.maxIterations ?? 5}`
+  if (activeTasks.length > 0) {
+    text += `\n\n*Tareas activas (${activeTasks.length}):*\n`
+    text += activeTasks.map(t => `  ${taskManager.statusEmoji(t.status)} \`#${t.id}\` _${escapeMd(t.title.slice(0,40))}_`).join('\n')
+  }
+  await ctx.reply(text, { parse_mode: 'Markdown' })
+  await ctx.answerCbQuery().catch(() => {})
+}
+
+async function handleTeamEditBtn(ctx, teamId) {
+  const team = teamManager.get(teamId)
+  if (!team) {
+    await ctx.answerCbQuery('❌ Equipo no encontrado', { show_alert: true }).catch(() => {})
+    return
+  }
+  await ctx.reply(
+    `✏️ *${escapeMd(team.name)}* — ¿Qué querés editar?`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🔁 Modo de review',      callback_data: `team_edit_reviewmode:${teamId}` }],
+          [{ text: '⏱ Intervalo heartbeat',  callback_data: `team_edit_heartbeat:${teamId}` }],
+          [{ text: '🔢 Máx. iteraciones',    callback_data: `team_edit_maxiter:${teamId}` }],
+          [{ text: '❌ Cancelar',             callback_data: 'action_cancel' }],
+        ],
+      },
+    }
+  )
+  await ctx.answerCbQuery().catch(() => {})
+}
+
+async function handleTeamDeleteBtn(ctx, teamId) {
+  const team = teamManager.get(teamId)
+  if (!team) {
+    await ctx.answerCbQuery('❌ Equipo no encontrado', { show_alert: true }).catch(() => {})
+    return
+  }
+  await ctx.editMessageText(
+    `⚠️ ¿Eliminar el equipo *${escapeMd(team.name)}*?\n_Esta acción no elimina los sub-agentes._`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '✅ Sí, borrar', callback_data: `team_delete_confirm:${teamId}` },
+          { text: '❌ Cancelar',   callback_data: 'team_list_refresh' },
+        ]],
+      },
+    }
+  ).catch(() => {})
+  await ctx.answerCbQuery().catch(() => {})
+}
+
+async function handleTeamDeleteConfirmBtn(ctx, teamId) {
+  try {
+    teamManager.remove(teamId, taskManager)
+    const teams = teamManager.list()
+    if (teams.length === 0) {
+      await ctx.editMessageText('✅ Equipo eliminado. No hay más equipos.').catch(() => {})
+    } else {
+      const text = buildTeamsMessage(teams)
+      const keyboard = buildTeamsKeyboard(teams)
+      await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard }).catch(() => {})
+    }
+    await ctx.answerCbQuery('🗑 Equipo eliminado').catch(() => {})
+  } catch (err) {
+    await ctx.editMessageText(`❌ ${err.message}`).catch(() => {})
+    await ctx.answerCbQuery('❌ Error', { show_alert: true }).catch(() => {})
+  }
+}
+
+async function handleTeamListRefresh(ctx) {
+  const teams = teamManager.list()
+  if (teams.length === 0) {
+    await ctx.editMessageText('No hay equipos creados todavía. Usá /buildteam para crear uno.').catch(() => {})
+  } else {
+    const text = buildTeamsMessage(teams)
+    const keyboard = buildTeamsKeyboard(teams)
+    await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard }).catch(() => {})
+  }
+  await ctx.answerCbQuery().catch(() => {})
+}
+
+async function handleTeamNewBtn(ctx) {
+  await ctx.answerCbQuery().catch(() => {})
+  await ctx.reply('Usá /buildteam para crear un nuevo equipo.')
 }
 
 async function handleDelTeam(ctx) {
@@ -1870,58 +2234,207 @@ async function handleCreateTask(ctx) {
   })
 }
 
-async function handleListTasks(ctx) {
-  const parts = ctx.message.text.trim().split(/\s+/)
-  const arg = parts[1] ?? null
-  const showAll = arg === 'all' || arg === 'todas'
-  const teamId = (!showAll && arg) ? arg : null
+// ─── Tasks list helpers ────────────────────────────────────────────────────────
 
-  let tasks
-  if (teamId) {
-    const team = teamManager.get(teamId)
-    if (!team) return ctx.reply(`❌ Team \`${teamId}\` no encontrado.`, { parse_mode: 'Markdown' })
-    tasks = taskManager.listAll(teamId)
-  } else if (showAll) {
-    tasks = taskManager.listAll()
-  } else {
-    tasks = [...taskManager.listActive(), ...taskManager.listCompletedToday()]
-      .filter((t, i, arr) => arr.findIndex(x => x.id === t.id) === i)
-  }
+const TASKS_PAGE_SIZE = 10
+const ACTIVE_STATUSES = ['pending','assigned','in_progress','in_review','awaiting_user_review','changes_requested']
 
-  if (tasks.length === 0) {
-    return ctx.reply(
-      teamId ? `No hay tareas para el equipo \`${teamId}\`.` : 'No hay tareas registradas.',
-      { parse_mode: 'Markdown' }
-    )
-  }
-
-  // Group by status
+function buildTasksMessage(tasks, showAll, teamId, page) {
   const groups = {
-    active:      tasks.filter(t => ['pending','assigned','in_progress','in_review','awaiting_user_review','changes_requested'].includes(t.status)),
-    done:        tasks.filter(t => t.status === 'done'),
-    failed:      tasks.filter(t => ['failed','interrupted','cancelled'].includes(t.status)),
+    active:  tasks.filter(t => ACTIVE_STATUSES.includes(t.status)),
+    done:    tasks.filter(t => t.status === 'done'),
+    failed:  tasks.filter(t => ['failed','interrupted','cancelled'].includes(t.status)),
   }
 
   function formatTask(t) {
     const elapsed = taskManager.elapsedMinutes(t)
     const time = elapsed > 0 ? ` ⏱ ${elapsed}min` : ''
-    const team = !teamId ? ` _[${teamManager.get(t.teamId)?.name ?? t.teamId}]_` : ''
-    return `${taskManager.statusEmoji(t.status)} \`#${t.id}\`${team} ${escapeMd(t.title)}${time}`
+    const teamLabel = !teamId ? ` _[${escapeMd(teamManager.get(t.teamId)?.name ?? t.teamId)}]_` : ''
+    return `${taskManager.statusEmoji(t.status)} \`#${t.id}\`${teamLabel} ${escapeMd(t.title)}${time}`
   }
 
   let text = teamId
     ? `📋 *Tareas — ${escapeMd(teamManager.get(teamId)?.name ?? teamId)}*`
     : showAll ? `📋 *Todas las tareas*` : `📋 *Tareas activas*`
 
+  if (page > 1) text += ` _(página ${page})_`
+
   if (groups.active.length)  text += `\n\n*En curso:*\n` + groups.active.map(formatTask).join('\n')
   if (groups.done.length)    text += `\n\n*Completadas:*\n` + groups.done.map(formatTask).join('\n')
   if (groups.failed.length)  text += `\n\n*Fallidas / canceladas:*\n` + groups.failed.map(formatTask).join('\n')
 
-  if (!showAll && !teamId) {
-    text += `\n\n_Usá \`/tasks all\` para ver todo el historial._`
+  return text
+}
+
+function buildTasksKeyboard(tasks, showAll, page, totalTasks) {
+  const keyboard = []
+
+  // Per-task buttons
+  for (const t of tasks) {
+    const isActive = ACTIVE_STATUSES.includes(t.status)
+    const row = [{ text: `🔍 #${t.id}`, callback_data: `task_detail:${t.id}` }]
+    if (isActive) row.push({ text: '❌ Cancelar', callback_data: `task_cancel:${t.id}` })
+    keyboard.push(row)
   }
 
+  // History and pagination row
+  const bottomRow = []
+  if (!showAll) bottomRow.push({ text: '📚 Ver historial completo', callback_data: 'tasks_history' })
+  keyboard.push(bottomRow)
+
+  // Pagination
+  const totalPages = Math.ceil(totalTasks / TASKS_PAGE_SIZE)
+  if (totalPages > 1) {
+    const navRow = []
+    if (page > 1) navRow.push({ text: '← Anterior', callback_data: `tasks_page:${page - 1}` })
+    if (page < totalPages) navRow.push({ text: 'Siguiente →', callback_data: `tasks_page:${page + 1}` })
+    if (navRow.length > 0) keyboard.push(navRow)
+  }
+
+  return { inline_keyboard: keyboard }
+}
+
+async function handleListTasks(ctx) {
+  const parts = (ctx.message?.text ?? '').trim().split(/\s+/)
+  const arg = parts[1] ?? null
+  const showAll = arg === 'all' || arg === 'todas'
+  const teamId = (!showAll && arg) ? arg : null
+  const page = 1
+
+  let allTasks
+  if (teamId) {
+    const team = teamManager.get(teamId)
+    if (!team) return ctx.reply(`❌ Team \`${teamId}\` no encontrado.`, { parse_mode: 'Markdown' })
+    allTasks = taskManager.listAll(teamId)
+  } else if (showAll) {
+    allTasks = taskManager.listAll()
+  } else {
+    allTasks = [...taskManager.listActive(), ...taskManager.listCompletedToday()]
+      .filter((t, i, arr) => arr.findIndex(x => x.id === t.id) === i)
+  }
+
+  if (allTasks.length === 0) {
+    return ctx.reply(
+      teamId ? `No hay tareas para el equipo \`${teamId}\`.` : 'No hay tareas registradas.',
+      { parse_mode: 'Markdown' }
+    )
+  }
+
+  const tasks = allTasks.slice(0, TASKS_PAGE_SIZE)
+  const text = buildTasksMessage(tasks, showAll, teamId, page)
+  const keyboard = buildTasksKeyboard(tasks, showAll, page, allTasks.length)
+
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard })
+}
+
+// ─── Task inline callback handlers ────────────────────────────────────────────
+
+async function handleTaskDetail(ctx, taskId) {
+  const task = taskManager.get(taskId.toUpperCase())
+  if (!task) {
+    await ctx.answerCbQuery('❌ Tarea no encontrada', { show_alert: true }).catch(() => {})
+    return
+  }
+  const team = teamManager.get(task.teamId)
+  const teamName = team?.name ?? task.teamId
+  const elapsed = taskManager.elapsedMinutes(task)
+  const historyLines = task.history.slice(-8).map(h => {
+    const ts = new Date(h.timestamp).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+    return `  ${ts} — ${escapeMd(h.event)}${h.note ? ` (${escapeMd(h.note.slice(0, 60))})` : ''}`
+  })
+  let text =
+    `${taskManager.statusEmoji(task.status)} *Tarea #${task.id}*\n` +
+    `_${escapeMd(task.title)}_\n\n` +
+    `🏢 Equipo: ${escapeMd(teamName)}\n` +
+    `📊 Estado: ${task.status}\n` +
+    (task.assignedTo ? `👷 Worker: \`${escapeMd(task.assignedTo)}\`\n` : '') +
+    (elapsed > 0 ? `⏱ Tiempo: ${elapsed} min\n` : '') +
+    `🔄 Iteraciones: ${task.iterations}\n\n` +
+    `📜 *Historial:*\n${historyLines.join('\n')}`
+  if (task.output) {
+    const preview = task.output.slice(0, 600)
+    text += `\n\n📄 *Output:*\n${escapeMd(preview)}${task.output.length > 600 ? '\n_(truncado...)_' : ''}`
+  }
   await ctx.reply(text, { parse_mode: 'Markdown' })
+  await ctx.answerCbQuery().catch(() => {})
+}
+
+async function handleTaskCancelPrompt(ctx, taskId) {
+  const task = taskManager.get(taskId.toUpperCase())
+  if (!task) {
+    await ctx.answerCbQuery('❌ Tarea no encontrada', { show_alert: true }).catch(() => {})
+    return
+  }
+  if (!ACTIVE_STATUSES.includes(task.status)) {
+    await ctx.answerCbQuery('La tarea ya no está activa', { show_alert: true }).catch(() => {})
+    return
+  }
+  await ctx.reply(
+    `⚠️ ¿Cancelar la tarea *#${task.id}* — _${escapeMd(task.title)}_?`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [[
+          { text: '✅ Sí, cancelar', callback_data: `task_cancel_confirm:${task.id}` },
+          { text: '❌ No',           callback_data: 'action_cancel' },
+        ]],
+      },
+    }
+  )
+  await ctx.answerCbQuery().catch(() => {})
+}
+
+async function handleTaskCancelConfirm(ctx, taskId) {
+  try {
+    taskManager.cancel(taskId.toUpperCase(), String(ctx.from.id))
+    teamWorkflow.cancelRunning(taskId.toUpperCase())
+    heartbeatManager.stop(taskId.toUpperCase())
+    await ctx.editMessageText(`✅ Tarea *#${taskId.toUpperCase()}* cancelada.`, {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [] },
+    }).catch(() => {})
+    await ctx.answerCbQuery('✅ Cancelada').catch(() => {})
+  } catch (err) {
+    await ctx.editMessageText(`❌ ${err.message}`).catch(() => {})
+    await ctx.answerCbQuery('❌ Error', { show_alert: true }).catch(() => {})
+  }
+}
+
+async function handleTasksHistory(ctx) {
+  const allTasks = taskManager.listAll()
+  if (allTasks.length === 0) {
+    await ctx.answerCbQuery('No hay tareas registradas').catch(() => {})
+    return
+  }
+  const tasks = allTasks.slice(0, TASKS_PAGE_SIZE)
+  const text = buildTasksMessage(tasks, true, null, 1)
+  const keyboard = buildTasksKeyboard(tasks, true, 1, allTasks.length)
+  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: keyboard })
+  await ctx.answerCbQuery().catch(() => {})
+}
+
+async function handleTasksPage(ctx, pageStr) {
+  const page = Math.max(1, parseInt(pageStr) || 1)
+  const allTasks = taskManager.listAll()
+  if (allTasks.length === 0) {
+    await ctx.answerCbQuery('No hay tareas').catch(() => {})
+    return
+  }
+  const start = (page - 1) * TASKS_PAGE_SIZE
+  const tasks = allTasks.slice(start, start + TASKS_PAGE_SIZE)
+  if (tasks.length === 0) {
+    await ctx.answerCbQuery('No hay más tareas').catch(() => {})
+    return
+  }
+  const text = buildTasksMessage(tasks, true, null, page)
+  const keyboard = buildTasksKeyboard(tasks, true, page, allTasks.length)
+  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard }).catch(() => {})
+  await ctx.answerCbQuery().catch(() => {})
+}
+
+async function handleActionCancel(ctx) {
+  await ctx.editMessageText('Operación cancelada.').catch(() => {})
+  await ctx.answerCbQuery().catch(() => {})
 }
 
 async function handleTaskStatus(ctx) {
@@ -2239,17 +2752,45 @@ module.exports = {
   handleEditAgentFieldSelect,
   handleEditAgentCliValSelect,
   handleEditAgentCancel,
+  // Agent inline callbacks (Phase 1)
+  handleAgentActivate,
+  handleAgentEditFromButton,
+  handleAgentDeletePrompt,
+  handleAgentDeleteConfirm,
+  handleAgentListRefresh,
+  handleAgentNew,
+  // Soul inline callbacks (Phase 2)
+  handleSoulEdit,
+  handleSoulReload,
+  // Memory inline callbacks (Phase 3)
+  handleMemoryForget,
+  handleMemoriesPage,
   // Teams
   handleBuildTeam,
   handleListTeams,
   handleDelTeam,
   handleEditTeam,
+  // Team inline callbacks (Phase 4)
+  handleTeamDetailBtn,
+  handleTeamEditBtn,
+  handleTeamDeleteBtn,
+  handleTeamDeleteConfirmBtn,
+  handleTeamListRefresh,
+  handleTeamNewBtn,
   // Tasks
   handleCreateTask,
   handleListTasks,
   handleTaskStatus,
   handleCancelTask,
   handleTeamStatus,
+  // Task inline callbacks (Phase 5)
+  handleTaskDetail,
+  handleTaskCancelPrompt,
+  handleTaskCancelConfirm,
+  handleTasksHistory,
+  handleTasksPage,
+  // Generic
+  handleActionCancel,
   // Team callbacks + feedback
   handleTeamCallback,
   handlePendingReviewFeedback,
