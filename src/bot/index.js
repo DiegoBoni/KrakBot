@@ -174,7 +174,7 @@ function createBot() {
   bot.command('automode',  handleAutoMode)
 
   // Audio/TTS commands
-  bot.command('voz',       handleVozHub)      // hub con inline keyboard
+  bot.command(['voice', 'voz'], handleVozHub) // hub con inline keyboard
   bot.command('listen',    handleListen)      // escuchar último mensaje directo
   bot.command('voicemode', handleVoiceMode)
   bot.command('ttsbutton', handleTtsButton)
