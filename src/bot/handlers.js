@@ -1100,16 +1100,114 @@ async function sendTtsAudio(ctx, text, voiceOrGender) {
   }
 }
 
+// ─── Audio hub helpers ─────────────────────────────────────────────────────────
+
+function buildAudioHubText(userId) {
+  const session = sessionManager.getOrCreate(userId)
+  const ttsVoice = session.ttsVoice
+  const voiceLabel = ttsVoice
+    ? (VOICE_CATALOG.flatMap(g => g.voices).find(v => v.id === ttsVoice)?.label ?? ttsVoice)
+    : (session.ttsGender === 'fem' ? 'Elena' : 'Tomás')
+  return (
+    `🎙️ *Voz & Audio*\n\n` +
+    `🎙️ Modo voz: *${session.voiceMode ? 'ON 🟢' : 'OFF 🔴'}*\n` +
+    `🔊 Botón audio: *${session.ttsButton ? 'ON 🟢' : 'OFF 🔴'}*\n` +
+    `🗣️ Voz activa: *${voiceLabel}*`
+  )
+}
+
+function buildAudioHubKeyboard(userId) {
+  const session = sessionManager.getOrCreate(userId)
+  return {
+    inline_keyboard: [
+      [
+        { text: `🎙️ Modo voz: ${session.voiceMode ? 'ON ✅' : 'OFF'}`, callback_data: 'audio_voicemode' },
+        { text: `🔊 Botón: ${session.ttsButton ? 'ON ✅' : 'OFF'}`,    callback_data: 'audio_ttsbutton' },
+      ],
+      [
+        { text: '🔈 Escuchar último mensaje', callback_data: 'audio_listen' },
+      ],
+      [
+        { text: '🗣️ Cambiar voz TTS', callback_data: 'audio_voice' },
+      ],
+    ]
+  }
+}
+
+async function handleVozHub(ctx) {
+  const userId = ctx.from.id
+  await ctx.reply(buildAudioHubText(userId), {
+    parse_mode: 'Markdown',
+    reply_markup: buildAudioHubKeyboard(userId)
+  })
+}
+
+async function handleAudioVoiceMode(ctx) {
+  const userId = ctx.from.id
+  const session = sessionManager.getOrCreate(userId)
+  const next = !(session.voiceMode ?? false)
+  sessionManager.setVoiceMode(userId, next)
+  if (next && session.ttsButton) sessionManager.setTtsButton(userId, false)
+  await ctx.answerCbQuery(next ? '🎙️ Modo voz ON' : '💬 Modo voz OFF').catch(() => {})
+  await ctx.editMessageText(buildAudioHubText(userId), {
+    parse_mode: 'Markdown',
+    reply_markup: buildAudioHubKeyboard(userId)
+  }).catch(() => {})
+}
+
+async function handleAudioTtsButton(ctx) {
+  const userId = ctx.from.id
+  const session = sessionManager.getOrCreate(userId)
+  const next = !(session.ttsButton ?? false)
+  sessionManager.setTtsButton(userId, next)
+  if (next && session.voiceMode) sessionManager.setVoiceMode(userId, false)
+  await ctx.answerCbQuery(next ? '🔊 Botón ON' : '🔇 Botón OFF').catch(() => {})
+  await ctx.editMessageText(buildAudioHubText(userId), {
+    parse_mode: 'Markdown',
+    reply_markup: buildAudioHubKeyboard(userId)
+  }).catch(() => {})
+}
+
+async function handleAudioListen(ctx) {
+  const userId = ctx.from.id
+  const lastResponse = sessionManager.getLastResponse(userId)
+  await ctx.answerCbQuery().catch(() => {})
+  if (!lastResponse) {
+    await ctx.reply('No hay respuesta reciente para convertir. Enviá un mensaje primero.')
+    return
+  }
+  const statusMsg = await ctx.reply('🎙️ Generando audio...').catch(() => null)
+  try {
+    await sendTtsAudio(ctx, lastResponse, getEffectiveVoice(userId))
+  } catch (err) {
+    logger.error(`TTS audio_listen failed for user ${userId}: ${err.message}`)
+    await ctx.reply(`❌ No pude generar el audio: ${err.message.split('\n')[0].slice(0, 150)}`)
+  } finally {
+    if (statusMsg) await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {})
+  }
+}
+
+async function handleAudioVoicePicker(ctx) {
+  await ctx.answerCbQuery().catch(() => {})
+  const userId = ctx.from.id
+  const current = sessionManager.getTtsVoice(userId)
+  const currentLabel = current
+    ? VOICE_CATALOG.flatMap(g => g.voices).find(v => v.id === current)?.label ?? current
+    : (sessionManager.getTtsGender(userId) === 'fem' ? 'Elena' : 'Tomás')
+  await ctx.reply(
+    `🔊 *Seleccioná el idioma de la voz*\n\nVoz actual: *${currentLabel}*`,
+    { parse_mode: 'Markdown', reply_markup: buildLangKeyboard('ttsvoice_l') }
+  )
+}
+
+// ─── Legacy toggle handlers (kept for direct command use) ──────────────────────
+
 async function handleVoiceMode(ctx) {
   const userId = ctx.from.id
   const session = sessionManager.getOrCreate(userId)
-  const current = session.voiceMode ?? false
-  const next = !current
+  const next = !(session.voiceMode ?? false)
   sessionManager.setVoiceMode(userId, next)
-  // If activating voiceMode, disable ttsButton to avoid conflict
-  if (next && session.ttsButton) {
-    sessionManager.setTtsButton(userId, false)
-  }
+  if (next && session.ttsButton) sessionManager.setTtsButton(userId, false)
   await ctx.reply(
     next
       ? '🎙️ *Modo voz ON* — Las respuestas llegarán solo como audio. Usá /voicemode para desactivar.'
@@ -1121,13 +1219,9 @@ async function handleVoiceMode(ctx) {
 async function handleTtsButton(ctx) {
   const userId = ctx.from.id
   const session = sessionManager.getOrCreate(userId)
-  const current = session.ttsButton ?? false
-  const next = !current
+  const next = !(session.ttsButton ?? false)
   sessionManager.setTtsButton(userId, next)
-  // If activating ttsButton, disable voiceMode to avoid conflict
-  if (next && session.voiceMode) {
-    sessionManager.setVoiceMode(userId, false)
-  }
+  if (next && session.voiceMode) sessionManager.setVoiceMode(userId, false)
   await ctx.reply(
     next
       ? '🔊 *Botón de audio activado* — Aparecerá un botón 🔊 bajo cada respuesta. Usá /ttsbutton para desactivarlo.'
@@ -2760,6 +2854,11 @@ module.exports = {
   handleAutoMode,
   handleDefault,
   // TTS
+  handleVozHub,
+  handleAudioVoiceMode,
+  handleAudioTtsButton,
+  handleAudioListen,
+  handleAudioVoicePicker,
   handleVoiceMode,
   handleTtsButton,
   handleListen,
