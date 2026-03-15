@@ -246,12 +246,12 @@ function buildAgentsKeyboard(userId) {
   const agents = listAgents()
   const keyboard = []
 
-  // Built-in agents
-  for (const a of agents) {
-    const isActive = a.key === session.agent
-    const row = []
-    if (!isActive) row.push({ text: `✅ Activar ${a.emoji} ${a.name}`, callback_data: `agent_activate:${a.key}` })
-    if (row.length > 0) keyboard.push(row)
+  // Built-in agents — de a 2 por fila para que no ocupen todo el ancho
+  const inactiveBuiltins = agents.filter(a => a.key !== session.agent)
+  for (let i = 0; i < inactiveBuiltins.length; i += 2) {
+    const row = [{ text: `✅ ${inactiveBuiltins[i].emoji} ${inactiveBuiltins[i].name}`, callback_data: `agent_activate:${inactiveBuiltins[i].key}` }]
+    if (inactiveBuiltins[i + 1]) row.push({ text: `✅ ${inactiveBuiltins[i + 1].emoji} ${inactiveBuiltins[i + 1].name}`, callback_data: `agent_activate:${inactiveBuiltins[i + 1].key}` })
+    keyboard.push(row)
   }
 
   // Custom agents
