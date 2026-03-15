@@ -28,6 +28,12 @@ const {
   handleAuto,
   handleAutoMode,
   handleDefault,
+  // Audio hub
+  handleVozHub,
+  handleAudioVoiceMode,
+  handleAudioTtsButton,
+  handleAudioListen,
+  handleAudioVoicePicker,
   // TTS
   handleVoiceMode,
   handleTtsButton,
@@ -167,10 +173,11 @@ function createBot() {
   bot.command('auto',      handleAuto)
   bot.command('automode',  handleAutoMode)
 
-  // TTS commands
+  // Audio/TTS commands
+  bot.command('voz',       handleVozHub)      // hub con inline keyboard
+  bot.command('listen',    handleListen)      // escuchar último mensaje directo
   bot.command('voicemode', handleVoiceMode)
   bot.command('ttsbutton', handleTtsButton)
-  bot.command(['listen', 'voz'], handleListen)
   bot.command('ttsvoice',  handleTtsVoice)
 
   // Team commands
@@ -236,6 +243,12 @@ function createBot() {
     await ctx.answerCbQuery().catch(() => {})
     await handleTtsVoice(ctx)
   })
+
+  // Audio hub callbacks
+  bot.action('audio_voicemode', handleAudioVoiceMode)
+  bot.action('audio_ttsbutton', handleAudioTtsButton)
+  bot.action('audio_listen',    handleAudioListen)
+  bot.action('audio_voice',     handleAudioVoicePicker)
 
   // newagent: CLI selection
   bot.action(/^newagent_cli:(.+)$/, async (ctx) => {
