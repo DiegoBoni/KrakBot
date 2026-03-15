@@ -254,15 +254,12 @@ function buildAgentsKeyboard(userId) {
     keyboard.push(row)
   }
 
-  // Custom agents
+  // Custom agents — un botón por agente, tap abre sub-menú
   const customAgents = customAgentManager.list()
   for (const a of customAgents) {
     const isActive = session.agent === `custom:${a.id}`
-    const row = []
-    if (!isActive) row.push({ text: `✅ Activar`, callback_data: `agent_activate:custom:${a.id}` })
-    row.push({ text: `✏️ Editar`, callback_data: `agent_edit:${a.id}` })
-    row.push({ text: `🗑 Borrar`, callback_data: `agent_delete:${a.id}` })
-    keyboard.push(row)
+    const label = isActive ? `${a.emoji} ${a.name} ✅` : `${a.emoji} ${a.name}`
+    keyboard.push([{ text: label, callback_data: `agent_manage:${a.id}` }])
   }
 
   // Last row
@@ -292,6 +289,34 @@ async function handleAgentActivate(ctx, agentKey) {
   const newKeyboard = buildAgentsKeyboard(userId)
   await ctx.editMessageText(newText, { parse_mode: 'Markdown', reply_markup: newKeyboard }).catch(() => {})
   await ctx.answerCbQuery('✅ Agente activado').catch(() => {})
+}
+
+async function handleAgentManage(ctx, id) {
+  const agent = customAgentManager.get(id)
+  if (!agent) {
+    await ctx.answerCbQuery('❌ Agente no encontrado', { show_alert: true }).catch(() => {})
+    return
+  }
+  const session = sessionManager.getOrCreate(ctx.from.id)
+  const isActive = session.agent === `custom:${id}`
+  const statusLine = isActive ? ' — ✅ *activo*' : ''
+  await ctx.editMessageText(
+    `${agent.emoji} *${escapeMd(agent.name)}*${statusLine}\n_(${agent.cli ?? 'claude'})_ — ${escapeMd(agent.description)}`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            ...(isActive ? [] : [{ text: '✅ Activar', callback_data: `agent_activate:custom:${id}` }]),
+            { text: '✏️ Editar',  callback_data: `agent_edit:${id}` },
+            { text: '🗑 Borrar', callback_data: `agent_delete:${id}` },
+          ],
+          [{ text: '← Volver', callback_data: 'agent_list_refresh' }],
+        ],
+      },
+    }
+  ).catch(() => {})
+  await ctx.answerCbQuery().catch(() => {})
 }
 
 async function handleAgentEditFromButton(ctx, id) {
@@ -2754,6 +2779,7 @@ module.exports = {
   handleEditAgentCancel,
   // Agent inline callbacks (Phase 1)
   handleAgentActivate,
+  handleAgentManage,
   handleAgentEditFromButton,
   handleAgentDeletePrompt,
   handleAgentDeleteConfirm,

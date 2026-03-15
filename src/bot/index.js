@@ -48,6 +48,7 @@ const {
   handleEditAgentCancel,
   // Agent inline callbacks (Phase 1)
   handleAgentActivate,
+  handleAgentManage,
   handleAgentEditFromButton,
   handleAgentDeletePrompt,
   handleAgentDeleteConfirm,
@@ -277,6 +278,11 @@ function createBot() {
   })
 
   // ─── Phase 1: Agent inline callbacks ───────────────────────────────────────
+
+  // agent_manage: tap on custom agent → sub-menu with activate/edit/delete
+  bot.action(/^agent_manage:(.+)$/, async (ctx) => {
+    await handleAgentManage(ctx, ctx.match[1])
+  })
 
   // agent_activate: supports both built-in keys and "custom:id" form
   bot.action(/^agent_activate:(.+)$/, async (ctx) => {
