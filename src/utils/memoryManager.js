@@ -1,6 +1,7 @@
 const fs = require('fs')
 const path = require('path')
 const logger = require('./logger')
+const { encrypt, decrypt, isEncrypted, isEncryptionEnabled } = require('./cryptoHelper')
 
 const DATA_DIR = path.resolve(path.join(__dirname, '../../data'))
 const MEMORIES_DIR = path.join(DATA_DIR, 'memories')
@@ -39,11 +40,13 @@ class MemoryManager {
   _parseFile(filename) {
     try {
       const filepath = path.join(MEMORIES_DIR, filename)
-      const raw = fs.readFileSync(filepath, 'utf8')
-      const dateMatch = raw.match(/^---\ndate:\s*(.+?)\n---\n/s)
-      const date = dateMatch ? dateMatch[1].trim() : ''
-      const content = raw.replace(/^---\n[\s\S]*?---\n/, '').trim()
-      const id = filename.replace(/\.md$/, '')
+      const raw      = fs.readFileSync(filepath, 'utf8')
+      // Decrypt if needed — fall back to raw if plaintext (legacy files)
+      const text     = isEncrypted(raw) ? (decrypt(raw) ?? raw) : raw
+      const dateMatch = text.match(/^---\ndate:\s*(.+?)\n---\n/s)
+      const date    = dateMatch ? dateMatch[1].trim() : ''
+      const content = text.replace(/^---\n[\s\S]*?---\n/, '').trim()
+      const id      = filename.replace(/\.md$/, '')
       return { id, filename, date, content, preview: content.slice(0, 80) }
     } catch {
       return null
@@ -63,12 +66,16 @@ class MemoryManager {
 
   async save(content) {
     this._ensureDir()
-    const ts = this._timestamp()
-    const slug = this._slug(content)
-    const filename = `${ts}-${slug}.md`
-    const filepath = path.join(MEMORIES_DIR, filename)
+    const ts   = this._timestamp()
+    // When encryption is on, use a random suffix to avoid leaking content via filename
+    const slug = isEncryptionEnabled()
+      ? require('crypto').randomBytes(4).toString('hex')
+      : this._slug(content)
+    const filename    = `${ts}-${slug}.md`
+    const filepath    = path.join(MEMORIES_DIR, filename)
     const fileContent = `---\ndate: ${new Date().toISOString()}\n---\n\n${content.trim()}\n`
-    fs.writeFileSync(filepath, fileContent, 'utf8')
+    const toWrite     = encrypt(fileContent) ?? fileContent
+    fs.writeFileSync(filepath, toWrite, 'utf8')
     const id = filename.replace(/\.md$/, '')
     logger.debug(`MemoryManager: guardado ${filename}`)
     return id

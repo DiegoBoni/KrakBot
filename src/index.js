@@ -19,6 +19,13 @@ const ttsService = require('./utils/ttsService')
 async function main() {
   logger.info('🚀 Telegram AI Gateway arrancando...')
 
+  // Warn if at-rest encryption is not configured
+  if (!process.env.SESSION_SECRET) {
+    logger.warn('SESSION_SECRET no está configurado — sesiones y memorias se guardan en texto plano. Agregá SESSION_SECRET al .env para encriptarlas.')
+  } else {
+    logger.info('Encriptación de sesiones y memorias: activa (AES-256-GCM)')
+  }
+
   // Ensure persistent session storage directory exists (non-fatal).
   const sessionsDir = path.resolve(__dirname, '../data/sessions')
   try {
