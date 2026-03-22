@@ -17,6 +17,9 @@ const {
   handlePing,
   handleSoul,
   handleReloadSoul,
+  handlePolicy,
+  handlePolicyView,
+  handlePolicyEdit,
   handleSkip,
   handleRemember,
   handleMemories,
@@ -158,6 +161,7 @@ function createBot() {
   // Soul & memory commands
   bot.command('soul',       handleSoul)
   bot.command('reloadsoul', handleReloadSoul)
+  bot.command('policy',     handlePolicy)
   bot.command('skip',       handleSkip)
   bot.command('remember',   handleRemember)
   bot.command('memories',   handleMemories)
@@ -333,6 +337,16 @@ function createBot() {
 
   bot.action('soul_reload', async (ctx) => {
     await handleSoulReload(ctx)
+  })
+
+  // ─── Policy inline callbacks ────────────────────────────────────────────────
+
+  bot.action(/^policy_view:(.+)$/, async (ctx) => {
+    await handlePolicyView(ctx)
+  })
+
+  bot.action(/^policy_edit:(.+)$/, async (ctx) => {
+    await handlePolicyEdit(ctx)
   })
 
   // ─── Phase 3: Memory inline callbacks ──────────────────────────────────────
