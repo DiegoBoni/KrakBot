@@ -9,6 +9,7 @@ const { randomUUID } = require('crypto')
 const mammoth = require('mammoth')
 const XLSX    = require('xlsx')
 const JSZip   = require('jszip')
+const { audit } = require('./auditLogger')
 
 // ─── Allowlists ───────────────────────────────────────────────────────────────
 
@@ -26,6 +27,7 @@ const ALLOWED_IMAGE_EXTS = new Set(['jpg', 'jpeg', 'png', 'webp', 'gif'])
 const ALLOWED_BINARY_EXTS = new Set(['pdf', 'jpg', 'jpeg', 'png', 'webp', 'gif'])
 
 const MAX_TEXT_CHARS = 50_000
+const UPLOAD_ROOT    = path.resolve(__dirname, '../../data/uploads')
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -77,6 +79,12 @@ async function downloadTelegramFile(telegram, fileId, userId, originalName) {
   const ext = path.extname(originalName).toLowerCase() || '.bin'
   const uuid = randomUUID()
   const localPath = path.join(getUploadDir(userId), `${uuid}${ext}`)
+
+  const resolved = path.resolve(localPath)
+  if (!resolved.startsWith(UPLOAD_ROOT + path.sep)) {
+    audit('path_traversal_blocked', { userId, filename: originalName, resolvedPath: resolved })
+    throw new Error(`Path traversal bloqueado: ${resolved}`)
+  }
 
   const token = process.env.TELEGRAM_TOKEN
   const url = `https://api.telegram.org/file/bot${token}/${fileInfo.file_path}`

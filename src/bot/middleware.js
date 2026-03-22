@@ -1,4 +1,5 @@
 const logger = require('../utils/logger')
+const { audit } = require('../utils/auditLogger')
 
 /**
  * Returns a Telegraf middleware that restricts access to authorized user IDs.
@@ -24,6 +25,7 @@ function authMiddleware() {
     const userId = ctx.from?.id
     if (!userId || !allowedIds.includes(userId)) {
       logger.warn(`Unauthorized access attempt from user ${userId ?? 'unknown'}`)
+      audit('auth_denied', { userId: userId ?? null, username: ctx.from?.username ?? null })
       await ctx.reply('⛔ No estás autorizado para usar este bot.')
       return
     }
@@ -73,6 +75,7 @@ function rateLimiterMiddleware() {
 
     const secsLeft = Math.ceil((windowMs - (now - bucket.windowStart)) / 1000)
     logger.warn(`rateLimiter: userId ${userId} bloqueado (${bucket.count} reqs en ventana, ${secsLeft}s restantes)`)
+    audit('rate_limited', { userId, count: bucket.count, secsLeft })
     await ctx.reply(`⏳ Demasiadas solicitudes. Esperá ${secsLeft} segundos.`)
   }
 }

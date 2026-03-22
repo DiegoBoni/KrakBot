@@ -8,6 +8,7 @@ const ttsService = require('../utils/ttsService')
 const { VOICE_CATALOG } = ttsService
 const { createReadStream } = require('fs')
 const logger = require('../utils/logger')
+const { audit } = require('../utils/auditLogger')
 const { transcribe, checkWhisper } = require('../utils/audioTranscriber')
 // Team workflows
 const teamManager      = require('../utils/teamManager')
@@ -1882,6 +1883,7 @@ async function handleDocument(ctx) {
 
   const validation = fileManager.validateFile(doc.mime_type, doc.file_name ?? '')
   if (!validation.ok) {
+    audit('file_rejected', { userId, filename: doc.file_name ?? null, reason: validation.reason })
     return ctx.reply(
       `⚠️ ${validation.reason}\n\n` +
       `Formatos soportados: imágenes (jpg, png, webp, gif), PDF, y archivos de texto/código ` +

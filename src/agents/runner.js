@@ -1,5 +1,6 @@
 const { spawn } = require('child_process')
 const logger = require('../utils/logger')
+const { audit } = require('../utils/auditLogger')
 
 // Hard safety ceiling — 30 minutes. No user-configurable timeout.
 const SAFETY_TIMEOUT = 30 * 60 * 1000
@@ -88,6 +89,7 @@ function runCLI(command, input, signal) {
       if (settled) return
       settled = true
       killChild()
+      audit('process_timeout', { agent: bin, durationMs: SAFETY_TIMEOUT })
       reject(Object.assign(new Error('Timeout: el agente tardó más de 30 minutos.'), { timedOut: true }))
     }, SAFETY_TIMEOUT)
 
@@ -147,6 +149,7 @@ function runCLI(command, input, signal) {
 
       // Non-zero exit with no usable stdout — build a short error
       const shortError = buildShortError(stderr, code)
+      audit('process_error', { agent: bin, exitCode: code })
       reject(Object.assign(new Error(shortError), { exitCode: code, stderr }))
     })
   })
@@ -216,6 +219,7 @@ function runCLIStreaming(command, input, signal, onChunk) {
       if (settled) return
       settled = true
       killChild()
+      audit('process_timeout', { agent: bin, durationMs: SAFETY_TIMEOUT })
       reject(Object.assign(new Error('Timeout: el agente tardó más de 30 minutos.'), { timedOut: true }))
     }, SAFETY_TIMEOUT)
 
@@ -272,6 +276,7 @@ function runCLIStreaming(command, input, signal, onChunk) {
       }
 
       const shortError = buildShortError(stderr, code)
+      audit('process_error', { agent: bin, exitCode: code })
       reject(Object.assign(new Error(shortError), { exitCode: code, stderr }))
     })
   })
