@@ -1,5 +1,5 @@
 const { Telegraf } = require('telegraf')
-const { authMiddleware } = require('./middleware')
+const { authMiddleware, rateLimiterMiddleware } = require('./middleware')
 const updateChecker = require('../utils/updateChecker')
 const sessionManager = require('../utils/sessionManager')
 const {
@@ -110,6 +110,9 @@ function createBot() {
 
   // ─── Auth ──────────────────────────────────────────────────────────────────
   bot.use(authMiddleware())
+
+  // ─── Rate limiting ─────────────────────────────────────────────────────────
+  bot.use(rateLimiterMiddleware())
 
   // ─── Middleware: cancel active flows when user sends a command ─────────────
   bot.use((ctx, next) => {
