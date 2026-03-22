@@ -1,5 +1,6 @@
-const soulManager = require('./soulManager')
+const soulManager   = require('./soulManager')
 const memoryManager = require('./memoryManager')
+const policyManager = require('./policyManager')
 
 const HISTORY_ENTRY_MAX = 500
 const PROMPT_HARD_LIMIT = 12000
@@ -31,7 +32,9 @@ function buildHistoryBlock(history) {
 }
 
 async function build(prompt, session, options = {}) {
-  const soul = soulManager.get()
+  const soul      = soulManager.get()
+  const agentKey  = options.agentKey ?? session?.agent ?? null
+  const policy    = policyManager.get(agentKey)
   const memoryMode = getMemoryMode()
 
   let memoriesText = ''
@@ -40,7 +43,8 @@ async function build(prompt, session, options = {}) {
   }
 
   const historyBlock  = buildHistoryBlock(session.history)
-  const soulBlock     = soul ? `[SOUL]\n${soul}\n[/SOUL]` : ''
+  const soulBlock     = soul   ? `[SOUL]\n${soul}\n[/SOUL]` : ''
+  const policyBlock   = policy ? `[POLICY]\n${policy}\n[/POLICY]` : ''
   const agentBlock    = options.inlineSystemPrompt
     ? `[INSTRUCCIONES DEL AGENTE]\n${options.inlineSystemPrompt}\n[/INSTRUCCIONES DEL AGENTE]`
     : ''
@@ -49,24 +53,25 @@ async function build(prompt, session, options = {}) {
     ? `[ARCHIVO: ${options.fileName ?? 'archivo'}]\n${options.fileContent}\n[/ARCHIVO]`
     : ''
 
-  const blocks = [soulBlock, agentBlock, memoriesBlock, historyBlock, fileBlock].filter(Boolean)
+  // Priority order: SOUL → POLICY → AGENT → MEMORIES → HISTORY → FILE → Task
+  const blocks = [soulBlock, policyBlock, agentBlock, memoriesBlock, historyBlock, fileBlock].filter(Boolean)
   const suffix = `---\nTarea: ${prompt}`
 
   let full = blocks.length > 0
     ? `${blocks.join('\n\n')}\n\n${suffix}`
     : prompt
 
-  // If over the hard limit, drop memories first, then trim soul (fileBlock preserved)
+  // If over the hard limit: drop memories first, then trim soul (policy + file preserved)
   if (full.length > PROMPT_HARD_LIMIT) {
-    const blocksNoMemory = [soulBlock, agentBlock, historyBlock, fileBlock].filter(Boolean)
+    const blocksNoMemory = [soulBlock, policyBlock, agentBlock, historyBlock, fileBlock].filter(Boolean)
     full = blocksNoMemory.length > 0
       ? `${blocksNoMemory.join('\n\n')}\n\n${suffix}`
       : prompt
 
     if (full.length > PROMPT_HARD_LIMIT) {
-      const trimmedSoul = soul ? soul.slice(0, 1000) : ''
+      const trimmedSoul      = soul ? soul.slice(0, 1000) : ''
       const trimmedSoulBlock = trimmedSoul ? `[SOUL]\n${trimmedSoul}\n[/SOUL]` : ''
-      const blocksMinimal = [trimmedSoulBlock, agentBlock, historyBlock, fileBlock].filter(Boolean)
+      const blocksMinimal    = [trimmedSoulBlock, policyBlock, agentBlock, historyBlock, fileBlock].filter(Boolean)
       full = blocksMinimal.length > 0
         ? `${blocksMinimal.join('\n\n')}\n\n${suffix}`
         : prompt

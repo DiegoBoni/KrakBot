@@ -8,6 +8,8 @@ const ttsService = require('../utils/ttsService')
 const { VOICE_CATALOG } = ttsService
 const { createReadStream } = require('fs')
 const logger = require('../utils/logger')
+const { audit } = require('../utils/auditLogger')
+const policyManager = require('../utils/policyManager')
 const { transcribe, checkWhisper } = require('../utils/audioTranscriber')
 // Team workflows
 const teamManager      = require('../utils/teamManager')
@@ -576,6 +578,87 @@ async function handleReloadSoul(ctx) {
   await ctx.reply(
     exists ? '🔄 SOUL.md recargado correctamente.' : '⚠️ SOUL.md no encontrado en disco.'
   )
+}
+
+// ─── /policy ──────────────────────────────────────────────────────────────────
+
+const POLICY_AGENTS = ['default', 'claude', 'gemini', 'codex']
+
+async function handlePolicy(ctx) {
+  const parts  = (ctx.message?.text ?? '').trim().split(/\s+/)
+  const target = POLICY_AGENTS.includes(parts[1]?.toLowerCase()) ? parts[1].toLowerCase() : 'default'
+
+  const content = target === 'default'
+    ? policyManager.get(null)
+    : policyManager.get(target)
+
+  const label   = target === 'default' ? 'default.md' : `${target}.md`
+  const preview = content
+    ? (content.length > 3500 ? content.slice(0, 3500) + '\n...(truncado)' : content)
+    : `_(vacío — no existe data/policies/${label} todavía)_`
+
+  // Selector buttons for which file to view/edit
+  const selectorRow = POLICY_AGENTS.map((a) => ({
+    text: a === target ? `• ${a}` : a,
+    callback_data: `policy_view:${a}`,
+  }))
+
+  await ctx.reply(
+    `📋 *Política: ${label}*\n\n\`\`\`\n${preview}\n\`\`\``,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          selectorRow,
+          [{ text: '✏️ Editar', callback_data: `policy_edit:${target}` }],
+        ],
+      },
+    }
+  ).catch(() => ctx.reply(`📋 Política: ${label}\n\n${preview}`))
+}
+
+async function handlePolicyView(ctx) {
+  const target = ctx.callbackQuery?.data?.split(':')[1] ?? 'default'
+  const content = target === 'default'
+    ? policyManager.get(null)
+    : policyManager.get(target)
+
+  const label   = target === 'default' ? 'default.md' : `${target}.md`
+  const preview = content
+    ? (content.length > 3500 ? content.slice(0, 3500) + '\n...(truncado)' : content)
+    : `_(vacío — no existe data/policies/${label} todavía)_`
+
+  const selectorRow = POLICY_AGENTS.map((a) => ({
+    text: a === target ? `• ${a}` : a,
+    callback_data: `policy_view:${a}`,
+  }))
+
+  await ctx.editMessageText(
+    `📋 *Política: ${label}*\n\n\`\`\`\n${preview}\n\`\`\``,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          selectorRow,
+          [{ text: '✏️ Editar', callback_data: `policy_edit:${target}` }],
+        ],
+      },
+    }
+  ).catch(() => {})
+  await ctx.answerCbQuery().catch(() => {})
+}
+
+async function handlePolicyEdit(ctx) {
+  const userId = ctx.from.id
+  const target = ctx.callbackQuery?.data?.split(':')[1] ?? 'default'
+  const session = sessionManager.getOrCreate(userId)
+  session.editPolicyFlow = { target }
+  await ctx.editMessageReplyMarkup({ inline_keyboard: [] }).catch(() => {})
+  await ctx.reply(
+    `✏️ Escribí el nuevo contenido para *${target}.md* (reemplaza el archivo completo).\n\nMandá /cancel para cancelar.`,
+    { parse_mode: 'Markdown' }
+  )
+  await ctx.answerCbQuery().catch(() => {})
 }
 
 async function handleSkip(ctx) {
@@ -1386,6 +1469,23 @@ async function handleTask(ctx, forcedText) {
     return
   }
 
+  // ─── editPolicyFlow text step ──────────────────────────────────────────────
+
+  if (session.editPolicyFlow) {
+    const { target } = session.editPolicyFlow
+    session.editPolicyFlow = null
+    try {
+      const { writeFileSync, mkdirSync } = require('fs')
+      const filePath = policyManager.filePath(target)
+      mkdirSync(require('path').dirname(filePath), { recursive: true })
+      writeFileSync(filePath, text, 'utf8')
+      await ctx.reply(`✅ Política *${target}.md* guardada. Se aplicará en el próximo mensaje.`, { parse_mode: 'Markdown' })
+    } catch (err) {
+      await ctx.reply(`❌ No se pudo guardar la política: ${err.message.slice(0, 100)}`)
+    }
+    return
+  }
+
   // ─── editAgentFlow text step ───────────────────────────────────────────────
 
   if (session.editAgentFlow?.field && session.editAgentFlow.field !== 'cli') {
@@ -1882,6 +1982,7 @@ async function handleDocument(ctx) {
 
   const validation = fileManager.validateFile(doc.mime_type, doc.file_name ?? '')
   if (!validation.ok) {
+    audit('file_rejected', { userId, filename: doc.file_name ?? null, reason: validation.reason })
     return ctx.reply(
       `⚠️ ${validation.reason}\n\n` +
       `Formatos soportados: imágenes (jpg, png, webp, gif), PDF, y archivos de texto/código ` +
@@ -2887,6 +2988,10 @@ module.exports = {
   // Soul inline callbacks (Phase 2)
   handleSoulEdit,
   handleSoulReload,
+  // Policy
+  handlePolicy,
+  handlePolicyView,
+  handlePolicyEdit,
   // Memory inline callbacks (Phase 3)
   handleMemoryForget,
   handleMemoriesPage,

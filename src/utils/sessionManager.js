@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid')
 const fs = require('fs')
 const path = require('path')
 const logger = require('./logger')
+const { encrypt, decrypt, isEncrypted } = require('./cryptoHelper')
 
 const SESSIONS_DIR = path.resolve(__dirname, '../../data/sessions')
 
@@ -34,8 +35,13 @@ class SessionManager {
 
   _loadFromDisk(userId) {
     try {
-      const raw = fs.readFileSync(this._sessionPath(userId), 'utf8')
-      const data = JSON.parse(raw)
+      const raw  = fs.readFileSync(this._sessionPath(userId), 'utf8')
+      const json = isEncrypted(raw) ? decrypt(raw) : raw
+      if (!json) {
+        logger.warn(`Session decrypt failed for user ${userId} — file may be corrupt or SESSION_SECRET changed`)
+        return null
+      }
+      const data = JSON.parse(json)
       if (!data.userId || !Array.isArray(data.history)) return null
       logger.debug(`Session loaded from disk for user ${userId} (${data.history.length} entries)`)
       return {
@@ -66,7 +72,7 @@ class SessionManager {
   }
 
   _saveToDisk(session) {
-    const data = JSON.stringify({
+    const json = JSON.stringify({
       version: 1,
       id: session.id,
       userId: session.userId,
@@ -80,6 +86,7 @@ class SessionManager {
       ttsVoice: session.ttsVoice ?? null,
       savedAt: new Date().toISOString(),
     }, null, 2)
+    const data = encrypt(json) ?? json  // encrypt if SESSION_SECRET is set, else plain text
     try {
       fs.writeFileSync(this._sessionPath(session.userId), data, 'utf8')
     } catch (err) {

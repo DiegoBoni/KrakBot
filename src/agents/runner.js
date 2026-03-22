@@ -1,8 +1,53 @@
 const { spawn } = require('child_process')
 const logger = require('../utils/logger')
+const { audit } = require('../utils/auditLogger')
 
 // Hard safety ceiling — 30 minutes. No user-configurable timeout.
 const SAFETY_TIMEOUT = 30 * 60 * 1000
+
+// Allowlist of env vars passed to child CLI processes.
+// Bot-internal secrets (TELEGRAM_TOKEN, GITHUB_TOKEN, etc.) are never included.
+const CHILD_ENV_ALLOWLIST = [
+  'HOME', 'PATH', 'TERM', 'USER', 'SHELL',
+  'LANG', 'LC_ALL', 'TMPDIR', 'XDG_CONFIG_HOME',
+  'CLAUDE_API_KEY', 'ANTHROPIC_API_KEY',
+  'GEMINI_API_KEY', 'GOOGLE_API_KEY',
+  'OPENAI_API_KEY',
+]
+
+/**
+ * Builds a sanitized environment for child CLI processes.
+ * Only vars in CHILD_ENV_ALLOWLIST are passed, plus any extras
+ * defined by the operator via CHILD_ENV_EXTRA (KEY=VALUE,KEY2=VALUE2 or KEY to inherit).
+ */
+function buildChildEnv() {
+  const env = {}
+  for (const key of CHILD_ENV_ALLOWLIST) {
+    if (process.env[key] !== undefined) env[key] = process.env[key]
+  }
+  if (!env.TERM) env.TERM = 'xterm-256color'
+
+  const extra = process.env.CHILD_ENV_EXTRA || ''
+  if (extra) {
+    for (const entry of extra.split(',').map((s) => s.trim()).filter(Boolean)) {
+      const eqIdx = entry.indexOf('=')
+      if (eqIdx === 0 || entry.includes('==')) {
+        logger.warn(`buildChildEnv: entrada inválida en CHILD_ENV_EXTRA ignorada: "${entry}"`)
+        continue
+      }
+      if (eqIdx === -1) {
+        // KEY only — inherit value from parent env
+        if (process.env[entry] !== undefined) env[entry] = process.env[entry]
+      } else {
+        // KEY=VALUE — explicit value
+        const key = entry.slice(0, eqIdx)
+        const val = entry.slice(eqIdx + 1)
+        if (key) env[key] = val
+      }
+    }
+  }
+  return env
+}
 
 /**
  * Runs a CLI command with the given arguments, feeding input via stdin.
@@ -24,8 +69,7 @@ function runCLI(command, input, signal) {
     let stderr = ''
     let settled = false
 
-    const childEnv = { ...process.env, TERM: 'xterm-256color' }
-    delete childEnv.CLAUDECODE  // allow spawning claude CLI from inside a Claude session
+    const childEnv = buildChildEnv()
 
     const child = spawn(bin, args, {
       env: childEnv,
@@ -45,6 +89,7 @@ function runCLI(command, input, signal) {
       if (settled) return
       settled = true
       killChild()
+      audit('process_timeout', { agent: bin, durationMs: SAFETY_TIMEOUT })
       reject(Object.assign(new Error('Timeout: el agente tardó más de 30 minutos.'), { timedOut: true }))
     }, SAFETY_TIMEOUT)
 
@@ -104,6 +149,7 @@ function runCLI(command, input, signal) {
 
       // Non-zero exit with no usable stdout — build a short error
       const shortError = buildShortError(stderr, code)
+      audit('process_error', { agent: bin, exitCode: code })
       reject(Object.assign(new Error(shortError), { exitCode: code, stderr }))
     })
   })
@@ -156,8 +202,7 @@ function runCLIStreaming(command, input, signal, onChunk) {
     let stderr = ''
     let settled = false
 
-    const childEnv = { ...process.env, TERM: 'xterm-256color' }
-    delete childEnv.CLAUDECODE
+    const childEnv = buildChildEnv()
 
     const child = spawn(bin, args, {
       env: childEnv,
@@ -174,6 +219,7 @@ function runCLIStreaming(command, input, signal, onChunk) {
       if (settled) return
       settled = true
       killChild()
+      audit('process_timeout', { agent: bin, durationMs: SAFETY_TIMEOUT })
       reject(Object.assign(new Error('Timeout: el agente tardó más de 30 minutos.'), { timedOut: true }))
     }, SAFETY_TIMEOUT)
 
@@ -230,6 +276,7 @@ function runCLIStreaming(command, input, signal, onChunk) {
       }
 
       const shortError = buildShortError(stderr, code)
+      audit('process_error', { agent: bin, exitCode: code })
       reject(Object.assign(new Error(shortError), { exitCode: code, stderr }))
     })
   })
