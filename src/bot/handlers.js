@@ -2928,6 +2928,75 @@ async function handlePendingReviewFeedback(ctx) {
   return true
 }
 
+// ─── Send file to user ─────────────────────────────────────────────────────────
+
+async function handleSendFile(ctx) {
+  const args = ctx.message.text.split(/\s+/).slice(1).join(' ').trim()
+
+  if (!args) {
+    return ctx.reply(
+      '📎 *Uso:* `/sendfile <ruta>`\n\n' +
+      'Ejemplos:\n' +
+      '`/sendfile ~/Desktop/n8n_instalacion_BCR.md`\n' +
+      '`/sendfile /Users/boni/Desktop/archivo.txt`',
+      { parse_mode: 'Markdown' }
+    )
+  }
+
+  const os = require('os')
+  const fsSync = require('fs')
+
+  // Expand ~ to home directory
+  const expanded = args.startsWith('~')
+    ? path.join(os.homedir(), args.slice(1))
+    : args
+
+  const resolved = path.resolve(expanded)
+
+  // Restrict to safe directories only
+  const home = os.homedir()
+  const ALLOWED_ROOTS = [
+    path.join(home, 'Desktop'),
+    path.join(home, 'Escritorio'),
+    path.join(home, 'Documents'),
+    path.join(home, 'Documentos'),
+    path.join(home, 'Downloads'),
+    path.join(home, 'Descargas'),
+  ]
+
+  const isAllowed = ALLOWED_ROOTS.some(root => resolved.startsWith(root + path.sep) || resolved === root)
+  if (!isAllowed) {
+    return ctx.reply(
+      '🚫 Solo puedo enviar archivos desde:\n' +
+      '• `~/Desktop` / `~/Escritorio`\n' +
+      '• `~/Documents` / `~/Documentos`\n' +
+      '• `~/Downloads` / `~/Descargas`',
+      { parse_mode: 'Markdown' }
+    )
+  }
+
+  if (!fsSync.existsSync(resolved)) {
+    return ctx.reply(`❌ Archivo no encontrado:\n\`${resolved}\``, { parse_mode: 'Markdown' })
+  }
+
+  const stat = fsSync.statSync(resolved)
+  if (!stat.isFile()) {
+    return ctx.reply('❌ Eso no es un archivo válido.')
+  }
+
+  // Telegram document limit: 50 MB
+  const MAX_SIZE = 50 * 1024 * 1024
+  if (stat.size > MAX_SIZE) {
+    return ctx.reply(`❌ El archivo pesa más de 50 MB (${fileManager.formatSize(stat.size)}).`)
+  }
+
+  const filename = path.basename(resolved)
+  await ctx.replyWithDocument(
+    { source: createReadStream(resolved), filename },
+    { caption: `📎 ${filename} (${fileManager.formatSize(stat.size)})` }
+  )
+}
+
 module.exports = {
   handleStart,
   handleHelp,
@@ -3019,6 +3088,8 @@ module.exports = {
   handleTaskCancelConfirm,
   handleTasksHistory,
   handleTasksPage,
+  // Send file
+  handleSendFile,
   // Generic
   handleActionCancel,
   // Team callbacks + feedback
