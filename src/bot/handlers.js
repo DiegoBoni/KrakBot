@@ -1500,6 +1500,9 @@ async function handleTask(ctx, forcedText) {
     return
   }
 
+  // ─── Natural language file send ────────────────────────────────────────────
+  if (await tryNaturalFileIntent(ctx, text)) return
+
   // T9: If a background task is already running, route this message to the
   // continuity agent so the user isn't left hanging.
   const existingBg = sessionManager.getBackgroundTask(userId)
@@ -2925,6 +2928,66 @@ async function handlePendingReviewFeedback(ctx) {
   delete _reviewSession.pendingReviewFeedback
   const comment = ctx.message?.text ?? ''
   await teamWorkflow.resumeAfterUserReview(taskId, 'changes_requested', comment, ctx.telegram)
+  return true
+}
+
+// ─── Natural language file send detection ──────────────────────────────────────
+
+const FILE_INTENT_RE = /\b(?:mand[aá](?:me)?|env[ií](?:a|á|me)?|pas[aá](?:me)?|compart[ií](?:me)?)\b.{0,60}?\b(?:archivo|file|doc(?:umento)?|\.md|\.pdf|\.txt|\.zip|\.png|\.jpg|\.xlsx?|\.csv)\b/i
+const ALLOWED_FILE_ROOTS_FN = () => {
+  const os = require('os')
+  const home = os.homedir()
+  return [
+    path.join(home, 'Desktop'),
+    path.join(home, 'Escritorio'),
+    path.join(home, 'Documents'),
+    path.join(home, 'Documentos'),
+    path.join(home, 'Downloads'),
+    path.join(home, 'Descargas'),
+  ]
+}
+
+async function tryNaturalFileIntent(ctx, text) {
+  if (!FILE_INTENT_RE.test(text)) return false
+
+  const fsSync = require('fs')
+
+  // Extract a filename hint from the message (look for a word with extension or a known name pattern)
+  const extMatch = text.match(/[\w\-. ]+\.(?:md|pdf|txt|zip|png|jpg|jpeg|gif|xlsx?|csv|docx?|pptx?)/i)
+  if (!extMatch) return false
+
+  const hint = extMatch[0].trim()
+  const roots = ALLOWED_FILE_ROOTS_FN()
+
+  // Search for the file in allowed roots
+  let found = null
+  for (const root of roots) {
+    if (!fsSync.existsSync(root)) continue
+    const entries = fsSync.readdirSync(root, { withFileTypes: true })
+    for (const entry of entries) {
+      if (!entry.isFile()) continue
+      if (entry.name.toLowerCase().includes(hint.toLowerCase()) || entry.name.toLowerCase() === hint.toLowerCase()) {
+        found = path.join(root, entry.name)
+        break
+      }
+    }
+    if (found) break
+  }
+
+  if (!found) return false
+
+  const stat = fsSync.statSync(found)
+  const MAX_SIZE = 50 * 1024 * 1024
+  if (stat.size > MAX_SIZE) {
+    await ctx.reply(`❌ El archivo pesa más de 50 MB (${fileManager.formatSize(stat.size)}).`)
+    return true
+  }
+
+  const filename = path.basename(found)
+  await ctx.replyWithDocument(
+    { source: createReadStream(found), filename },
+    { caption: `📎 ${filename} (${fileManager.formatSize(stat.size)})` }
+  )
   return true
 }
 
