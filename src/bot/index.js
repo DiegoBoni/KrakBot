@@ -93,6 +93,8 @@ const {
   handleTaskCancelConfirm,
   handleTasksHistory,
   handleTasksPage,
+  // Send file
+  handleSendFile,
   // Generic
   handleActionCancel,
   // Team callbacks + feedback
@@ -186,6 +188,9 @@ function createBot() {
   bot.command('voicemode', handleVoiceMode)
   bot.command('ttsbutton', handleTtsButton)
   bot.command('ttsvoice',  handleTtsVoice)
+
+  // Send file command
+  bot.command('sendfile', handleSendFile)
 
   // Team commands
   bot.command('buildteam',   handleBuildTeam)
