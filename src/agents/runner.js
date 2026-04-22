@@ -27,6 +27,11 @@ function buildChildEnv() {
   }
   if (!env.TERM) env.TERM = 'xterm-256color'
 
+  // Drop placeholder API keys written by the installer — treat them as unset
+  for (const key of ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'GOOGLE_API_KEY', 'CLAUDE_API_KEY']) {
+    if (env[key] && /^(sk-YOUR_|YOUR_|PASTE_YOUR_|<YOUR)/i.test(env[key])) delete env[key]
+  }
+
   const extra = process.env.CHILD_ENV_EXTRA || ''
   if (extra) {
     for (const entry of extra.split(',').map((s) => s.trim()).filter(Boolean)) {
