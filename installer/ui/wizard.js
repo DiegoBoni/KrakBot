@@ -275,7 +275,7 @@ function updateAgentCard(name, status) {
     btnInstall.hidden = true
     authInstruction.hidden = false
     authRow.hidden = false
-    selectRow.hidden = false
+    selectRow.hidden = name === 'codex' ? !$('auth-check-codex')?.checked : false
   } else {
     badge.textContent = '❌ No instalado'
     badge.className = 'badge badge-error'
@@ -441,7 +441,7 @@ function buildConfig() {
     defaultAgent:   $('default-agent').value || 'claude',
     claudeModel:    $('model-claude').value || 'claude-sonnet-4-6',
     geminiModel:    $('model-gemini').value || 'gemini-2.5-pro',
-    codexModel:     $('model-codex').value || '',
+    codexModel:     $('auth-check-codex')?.checked ? ($('model-codex').value || '') : '',
     debug:          $('debug-toggle').checked,
     includeAudio:   state.isAppleSilicon && state.audioTools.mlxWhisper,
     whisperLanguage: 'es',
@@ -691,6 +691,14 @@ async function init() {
     const cb = $(`auth-check-${name}`)
     if (cb) cb.addEventListener('change', validateAgentStep)
   })
+
+  const codexAuthCb = $('auth-check-codex')
+  if (codexAuthCb) {
+    codexAuthCb.addEventListener('change', () => {
+      const selectRow = $('select-row-codex')
+      if (selectRow) selectRow.hidden = !codexAuthCb.checked
+    })
+  }
 
   $('btn-step4-back').addEventListener('click', () => goToStep(3))
   $('btn-step4-next').addEventListener('click', () => {
