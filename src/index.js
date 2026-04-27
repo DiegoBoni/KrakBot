@@ -150,6 +150,7 @@ async function main() {
     { command: 'auto',      description: 'Root Agent: elige el mejor agente' },
     { command: 'automode',  description: 'Activar/desactivar routing automático' },
     { command: 'sesion',    description: 'Info de la sesión actual' },
+    { command: 'cost',      description: 'Ver costo estimado de la sesión' },
     { command: 'limpiar',   description: 'Borrar historial de la sesión' },
     { command: 'ayuda',     description: 'Instrucciones de uso' },
     { command: 'ping',      description: 'Health check de los agentes' },
