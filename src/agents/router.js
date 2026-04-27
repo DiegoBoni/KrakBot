@@ -46,7 +46,7 @@ const AGENTS = {
     extraFlags: [
       '--full-auto',             // skip approval prompts (sandboxed auto-execution)
       '--skip-git-repo-check',   // allow running outside a git repo (cwd is HOME)
-      '-m', 'gpt-5.1-codex-mini',
+      '-m', 'codex-mini-latest',
       '-c', 'reasoning_effort="medium"',
     ],
     aliases: ['codex', 'gpt', 'o'],
