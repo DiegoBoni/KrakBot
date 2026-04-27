@@ -46,7 +46,8 @@ const AGENTS = {
     extraFlags: [
       '--full-auto',             // skip approval prompts (sandboxed auto-execution)
       '--skip-git-repo-check',   // allow running outside a git repo (cwd is HOME)
-      '-m', process.env.CODEX_MODEL || 'o4-mini',  // máx. suscripción ChatGPT
+      '-m', process.env.CODEX_MODEL || 'gpt-5.1-codex-mini',
+      '-c', `reasoning_effort="${process.env.CODEX_REASONING_EFFORT || 'medium'}"`,
     ],
     aliases: ['codex', 'gpt', 'o'],
     description: 'OpenAI Codex CLI — especializado en generación y edición de código.',
