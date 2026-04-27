@@ -477,6 +477,65 @@ async function handleSession(ctx) {
   )
 }
 
+// Pricing per million tokens (USD) — default to Sonnet 4.x rates
+const AGENT_PRICES = {
+  claude: { inputPer1M: 3.0,  outputPer1M: 15.0 },
+  gemini: { inputPer1M: 0.35, outputPer1M: 1.05 },
+  codex:  { inputPer1M: 3.0,  outputPer1M: 12.0 },
+}
+
+function _agentPricing(agentKey) {
+  const base = (agentKey ?? 'claude').split(':')[0]
+  return AGENT_PRICES[base] ?? AGENT_PRICES.claude
+}
+
+async function handleCost(ctx) {
+  const userId = ctx.from.id
+  const costs  = sessionManager.getCosts(userId)
+
+  if (!costs.length) {
+    return ctx.reply('📊 Todavía no hay consultas registradas en esta sesión.')
+  }
+
+  const byAgent = {}
+  let totalIn = 0, totalOut = 0, totalCost = 0
+
+  for (const entry of costs) {
+    const key        = entry.agent ?? 'claude'
+    const inTok      = Math.round(entry.inputChars  / 4)
+    const outTok     = Math.round(entry.outputChars / 4)
+    const pricing    = _agentPricing(key)
+    const cost       = (inTok / 1_000_000) * pricing.inputPer1M + (outTok / 1_000_000) * pricing.outputPer1M
+
+    if (!byAgent[key]) byAgent[key] = { calls: 0, inTok: 0, outTok: 0, cost: 0 }
+    byAgent[key].calls++
+    byAgent[key].inTok  += inTok
+    byAgent[key].outTok += outTok
+    byAgent[key].cost   += cost
+    totalIn   += inTok
+    totalOut  += outTok
+    totalCost += cost
+  }
+
+  const lines = ['💰 *Costo estimado de la sesión*\n']
+  for (const [key, d] of Object.entries(byAgent)) {
+    const info = getAgentInfo(key)
+    lines.push(
+      `${info?.emoji ?? '🤖'} *${info?.name ?? key}*: ${d.calls} consultas\n` +
+      `  Tokens: ${d.inTok.toLocaleString()} in / ${d.outTok.toLocaleString()} out\n` +
+      `  Costo: ~$${d.cost.toFixed(5)}`
+    )
+  }
+
+  lines.push(
+    `\n📊 *Total*: ~$${totalCost.toFixed(5)} USD`,
+    `  ${totalIn.toLocaleString()} tokens in / ${totalOut.toLocaleString()} out`,
+    `\n_⚠️ Estimación mínima (sin contexto inyectado)._`
+  )
+
+  await ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' })
+}
+
 async function handleClearHistory(ctx) {
   const userId = ctx.from.id
   const session = sessionManager.getOrCreate(userId)
@@ -1807,6 +1866,7 @@ async function handleTask(ctx, forcedText) {
     const effectiveAgent = agentKey || session.agent
     sessionManager.addToHistory(userId, 'user', prompt, effectiveAgent)
     sessionManager.addToHistory(userId, 'assistant', response, effectiveAgent)
+    sessionManager.recordCost(userId, effectiveAgent, prompt.length, response.length)
 
     // If a custom agent was invoked (via @mention or autoMode), make it the active
     // session agent so the conversation continues with it by default.
@@ -3067,6 +3127,7 @@ module.exports = {
   handleSetAgent,
   handleSetAgentCmd,
   handleSession,
+  handleCost,
   handleClearHistory,
   handleTask,
   handlePhoto,

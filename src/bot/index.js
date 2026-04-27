@@ -9,6 +9,7 @@ const {
   handleSetAgent,
   handleSetAgentCmd,
   handleSession,
+  handleCost,
   handleClearHistory,
   handleTask,
   handlePhoto,
@@ -147,6 +148,7 @@ function createBot() {
   bot.command(['help', 'ayuda'], handleHelp)
   bot.command(['agents', 'agentes'], handleListAgents)
   bot.command(['session', 'sesion'], handleSession)
+  bot.command('cost', handleCost)
   bot.command(['clear', 'limpiar'], handleClearHistory)
 
   // Agent-switching commands
