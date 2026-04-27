@@ -56,6 +56,7 @@ class SessionManager {
         ttsButton: data.ttsButton ?? false,
         ttsGender: data.ttsGender ?? 'masc',
         ttsVoice: data.ttsVoice ?? null,
+        costsLog: data.costsLog ?? [],
         onboarding: null,
         backgroundTask: null,
         newAgentFlow: null,
@@ -84,6 +85,7 @@ class SessionManager {
       ttsButton: session.ttsButton ?? false,
       ttsGender: session.ttsGender ?? 'masc',
       ttsVoice: session.ttsVoice ?? null,
+      costsLog: session.costsLog ?? [],
       savedAt: new Date().toISOString(),
     }, null, 2)
     const data = encrypt(json) ?? json  // encrypt if SESSION_SECRET is set, else plain text
@@ -120,6 +122,7 @@ class SessionManager {
         ttsButton: false,
         ttsGender: 'masc',
         ttsVoice: null,
+        costsLog: [],
         onboarding: null,
         backgroundTask: null,
         newAgentFlow: null,
@@ -217,6 +220,7 @@ class SessionManager {
     const session = this.getOrCreate(userId)
     session.history = []
     session.taskCount = 0
+    session.costsLog = []
     session.lastActivity = Date.now()
     logger.debug(`History cleared for user ${userId}`)
     try {
@@ -424,6 +428,29 @@ class SessionManager {
    */
   getLastResponse(userId) {
     return this.getOrCreate(userId).lastResponse ?? null
+  }
+
+  /**
+   * Records a cost entry for a user's session.
+   * @param {number|string} userId
+   * @param {string} agentKey
+   * @param {number} inputChars  characters in the user prompt
+   * @param {number} outputChars characters in the agent response
+   */
+  recordCost(userId, agentKey, inputChars, outputChars) {
+    const session = this.getOrCreate(userId)
+    if (!Array.isArray(session.costsLog)) session.costsLog = []
+    session.costsLog.push({ agent: agentKey, inputChars, outputChars, timestamp: Date.now() })
+    this._saveToDisk(session)
+  }
+
+  /**
+   * Returns the full costsLog for a user.
+   * @param {number|string} userId
+   * @returns {Array}
+   */
+  getCosts(userId) {
+    return this.getOrCreate(userId).costsLog ?? []
   }
 
   /**
