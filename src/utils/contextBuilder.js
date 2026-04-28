@@ -1,5 +1,6 @@
 const soulManager   = require('./soulManager')
 const memoryManager = require('./memoryManager')
+const ltmManager    = require('./ltmManager')
 const policyManager = require('./policyManager')
 
 const HISTORY_ENTRY_MAX = 500
@@ -42,6 +43,13 @@ async function build(prompt, session, options = {}) {
     memoriesText = await memoryManager.getRecent(5, getMemoryLimit())
   }
 
+  // Long-term memory: per-user compacted summary file
+  const ltmEnabled  = process.env.LTM_ENABLED
+  const ltmOn       = ltmEnabled === undefined || ltmEnabled === '' || ltmEnabled === 'true' || ltmEnabled === '1'
+  const ltmMaxChars = parseInt(process.env.LTM_MAX_CHARS) || 4000
+  const ltmRaw      = ltmOn && session?.userId ? ltmManager.read(session.userId) : ''
+  const ltmText     = ltmRaw.length > ltmMaxChars ? ltmRaw.slice(0, ltmMaxChars) : ltmRaw
+
   const historyBlock  = buildHistoryBlock(session.history)
   const soulBlock     = soul   ? `[SOUL]\n${soul}\n[/SOUL]` : ''
   const policyBlock   = policy ? `[POLICY]\n${policy}\n[/POLICY]` : ''
@@ -49,33 +57,41 @@ async function build(prompt, session, options = {}) {
     ? `[INSTRUCCIONES DEL AGENTE]\n${options.inlineSystemPrompt}\n[/INSTRUCCIONES DEL AGENTE]`
     : ''
   const memoriesBlock = memoriesText ? `[MEMORIES]\n${memoriesText}\n[/MEMORIES]` : ''
+  const ltmBlock      = ltmText      ? `[MEMORIA_LARGO_PLAZO]\n${ltmText}\n[/MEMORIA_LARGO_PLAZO]` : ''
   const fileBlock     = options.fileContent
     ? `[ARCHIVO: ${options.fileName ?? 'archivo'}]\n${options.fileContent}\n[/ARCHIVO]`
     : ''
 
-  // Priority order: SOUL → POLICY → AGENT → MEMORIES → HISTORY → FILE → Task
-  const blocks = [soulBlock, policyBlock, agentBlock, memoriesBlock, historyBlock, fileBlock].filter(Boolean)
+  // Priority order: SOUL → POLICY → AGENT → MEMORIES → LTM → HISTORY → FILE → Task
+  const blocks = [soulBlock, policyBlock, agentBlock, memoriesBlock, ltmBlock, historyBlock, fileBlock].filter(Boolean)
   const suffix = `---\nTarea: ${prompt}`
 
   let full = blocks.length > 0
     ? `${blocks.join('\n\n')}\n\n${suffix}`
     : prompt
 
-  // If over the hard limit: drop memories first, then trim soul (policy + file preserved)
+  // If over the hard limit: drop LTM first, then memories, then trim soul (policy + file preserved)
+  if (full.length > PROMPT_HARD_LIMIT) {
+    const blocksNoLtm = [soulBlock, policyBlock, agentBlock, memoriesBlock, historyBlock, fileBlock].filter(Boolean)
+    full = blocksNoLtm.length > 0
+      ? `${blocksNoLtm.join('\n\n')}\n\n${suffix}`
+      : prompt
+  }
+
   if (full.length > PROMPT_HARD_LIMIT) {
     const blocksNoMemory = [soulBlock, policyBlock, agentBlock, historyBlock, fileBlock].filter(Boolean)
     full = blocksNoMemory.length > 0
       ? `${blocksNoMemory.join('\n\n')}\n\n${suffix}`
       : prompt
+  }
 
-    if (full.length > PROMPT_HARD_LIMIT) {
-      const trimmedSoul      = soul ? soul.slice(0, 1000) : ''
-      const trimmedSoulBlock = trimmedSoul ? `[SOUL]\n${trimmedSoul}\n[/SOUL]` : ''
-      const blocksMinimal    = [trimmedSoulBlock, policyBlock, agentBlock, historyBlock, fileBlock].filter(Boolean)
-      full = blocksMinimal.length > 0
-        ? `${blocksMinimal.join('\n\n')}\n\n${suffix}`
-        : prompt
-    }
+  if (full.length > PROMPT_HARD_LIMIT) {
+    const trimmedSoul      = soul ? soul.slice(0, 1000) : ''
+    const trimmedSoulBlock = trimmedSoul ? `[SOUL]\n${trimmedSoul}\n[/SOUL]` : ''
+    const blocksMinimal    = [trimmedSoulBlock, policyBlock, agentBlock, historyBlock, fileBlock].filter(Boolean)
+    full = blocksMinimal.length > 0
+      ? `${blocksMinimal.join('\n\n')}\n\n${suffix}`
+      : prompt
   }
 
   return full
