@@ -8,7 +8,7 @@ const SESSIONS_DIR = path.resolve(__dirname, '../../data/sessions')
 
 function getHistoryWindow() {
   const n = parseInt(process.env.HISTORY_WINDOW)
-  return isNaN(n) || n < 0 ? 6 : n
+  return isNaN(n) || n < 0 ? 10 : n
 }
 
 function getSessionTTL() {
@@ -202,10 +202,24 @@ class SessionManager {
     session.lastActivity = Date.now()
     if (role === 'user') session.taskCount++
 
-    // Rolling window: keep last HISTORY_WINDOW pairs (user + assistant)
+    // Rolling window: evict oldest complete pairs when over the limit.
+    // Evicting by pairs (2 messages at a time) ensures the compactor always
+    // receives a complete user+assistant exchange to summarize.
     const win = getHistoryWindow()
-    if (win > 0 && session.history.length > win * 2) {
-      session.history = session.history.slice(-win * 2)
+    if (win > 0) {
+      while (Math.floor(session.history.length / 2) > win) {
+        const evicted = session.history.splice(0, 2)
+        const _userId  = userId
+        const _agent   = session.agent
+        ;(async () => {
+          try {
+            const compactor = require('./ltmCompactor')
+            await compactor.compact(evicted, _userId, _agent)
+          } catch (err) {
+            logger.warn(`LTM compaction failed for user ${_userId}: ${err.message}`)
+          }
+        })()
+      }
     }
 
     this._saveToDisk(session)
@@ -451,6 +465,16 @@ class SessionManager {
    */
   getCosts(userId) {
     return this.getOrCreate(userId).costsLog ?? []
+  }
+
+  /**
+   * Deletes the long-term memory file for a user.
+   * @param {number|string} userId
+   */
+  clearLtm(userId) {
+    const ltmManager = require('./ltmManager')
+    ltmManager.remove(String(userId))
+    logger.debug(`LTM cleared for user ${userId}`)
   }
 
   /**
