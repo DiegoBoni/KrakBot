@@ -2,6 +2,7 @@ const { dispatch, dispatchStreaming, resolveAgent, getAgentInfo, listAgents, rou
 const sessionManager = require('../utils/sessionManager')
 const soulManager = require('../utils/soulManager')
 const memoryManager = require('../utils/memoryManager')
+const ltmManager    = require('../utils/ltmManager')
 const customAgentManager = require('../utils/customAgentManager')
 const fileManager = require('../utils/fileManager')
 const ttsService = require('../utils/ttsService')
@@ -538,6 +539,8 @@ async function handleCost(ctx) {
 
 async function handleClearHistory(ctx) {
   const userId = ctx.from.id
+  const parts  = (ctx.message?.text ?? '').trim().split(/\s+/)
+  const subcmd = parts[1]?.toLowerCase()
   const session = sessionManager.getOrCreate(userId)
 
   // Cancel any active flows
@@ -562,7 +565,16 @@ async function handleClearHistory(ctx) {
     sessionManager.clearPendingFile(userId)
   }
   sessionManager.clearHistory(userId)
-  await ctx.reply('🗑 Historial borrado. La siguiente respuesta comenzará sin contexto previo.')
+
+  if (subcmd === 'ltm') {
+    ltmManager.remove(userId)
+    await ctx.reply('🗑 Sesión y memoria de largo plazo borradas.')
+  } else {
+    await ctx.reply(
+      '🗑 Historial borrado. La siguiente respuesta comenzará sin contexto previo.\n_La memoria de largo plazo se conserva._',
+      { parse_mode: 'Markdown' }
+    )
+  }
 }
 
 // ─── Soul handlers ─────────────────────────────────────────────────────────────
@@ -745,7 +757,24 @@ async function handleRemember(ctx) {
 }
 
 async function handleMemories(ctx) {
-  const parts = (ctx.message?.text ?? '').trim().split(/\s+/)
+  const parts  = (ctx.message?.text ?? '').trim().split(/\s+/)
+  const subcmd = parts[1]?.toLowerCase()
+
+  // /memories larga → show long-term memory
+  if (subcmd === 'larga') {
+    const userId = ctx.from.id
+    const ltm    = ltmManager.read(userId)
+    if (!ltm) {
+      await ctx.reply('Todavía no hay memoria de largo plazo.')
+      return
+    }
+    const MAX = parseInt(process.env.MAX_RESPONSE_LENGTH) || 4000
+    for (let offset = 0; offset < ltm.length; offset += MAX) {
+      await ctx.reply(ltm.slice(offset, offset + MAX))
+    }
+    return
+  }
+
   const page = parseInt(parts[1]) || 1
   const memories = await memoryManager.list(page, 10)
 
