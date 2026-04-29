@@ -760,8 +760,8 @@ async function handleMemories(ctx) {
   const parts  = (ctx.message?.text ?? '').trim().split(/\s+/)
   const subcmd = parts[1]?.toLowerCase()
 
-  // /memories larga → show long-term memory
-  if (subcmd === 'larga') {
+  // /memories larga | /memories ltm → show long-term memory
+  if (subcmd === 'larga' || subcmd === 'ltm') {
     const userId = ctx.from.id
     const ltm    = ltmManager.read(userId)
     if (!ltm) {
