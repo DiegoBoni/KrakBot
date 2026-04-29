@@ -72,8 +72,11 @@ npm start
 | `SOUL_PATH`                 | `./data/SOUL.md`                   | Ruta al archivo de soul (personalidad del bot)               |
 | `MEMORY_INJECT`             | `recent`                           | Modo de inyección de memorias: `recent` \| `all` \| `none`   |
 | `MEMORY_INJECT_LIMIT`       | `2000`                             | Máximo de chars de memorias a inyectar en el contexto        |
-| `HISTORY_WINDOW`            | `6`                                | Pares de mensajes a conservar en el historial de contexto    |
+| `HISTORY_WINDOW`            | `10`                               | Pares de mensajes en la ventana activa de contexto (STM)     |
 | `SESSION_TTL_HOURS`         | `0`                                | Horas de inactividad para expirar sesión (0 = nunca)         |
+| `LTM_ENABLED`               | `true`                             | Compactación automática de conversaciones en LTM             |
+| `LTM_MAX_CHARS`             | `4000`                             | Tamaño máximo del archivo LTM en chars antes de re-resumir   |
+| `LTM_COMPACT_TIMEOUT_SECONDS` | `30`                             | Timeout del call de compactación al agente (segundos)        |
 | `WHISPER_MODEL`             | `mlx-community/whisper-base-mlx`   | Modelo de Whisper para transcripción de audios               |
 | `WHISPER_LANGUAGE`          | `es`                               | Idioma para Whisper (`es`, `en`, etc.)                       |
 | `AUDIO_TEMP_DIR`            | `/tmp/krakbot-audio`               | Directorio temporal para archivos de audio                   |
@@ -143,22 +146,25 @@ npm start
 
 ### Sesión e historial
 
-| Comando     | Descripción                                 |
-|-------------|---------------------------------------------|
-| `/session`  | Ver info de la sesión actual                |
-| `/clear`    | Borrar historial de la conversación         |
+| Comando         | Descripción                                                              |
+|-----------------|--------------------------------------------------------------------------|
+| `/session`      | Ver info de la sesión actual                                             |
+| `/cost`         | Ver el costo estimado de tokens de la sesión, desglosado por agente      |
+| `/clear`        | Borrar historial de la conversación (la LTM se conserva)                 |
+| `/clear ltm`    | Borrar historial **y** memoria de largo plazo                            |
 
 ### Soul & memoria
 
-| Comando       | Descripción                                        |
-|---------------|----------------------------------------------------|
-| `/soul`       | Ver el system prompt (soul) activo                 |
-| `/reloadsoul` | Recargar el soul desde el archivo                  |
-| `/skip`       | Saltar el soul en la próxima respuesta             |
-| `/remember`   | Guardar un dato en la memoria persistente del bot  |
-| `/memories`   | Ver todas las memorias guardadas                   |
-| `/forget`     | Borrar una memoria                                 |
-| `/policy`     | Ver y editar las políticas de comportamiento de los agentes |
+| Comando           | Descripción                                                  |
+|-------------------|--------------------------------------------------------------|
+| `/soul`           | Ver el system prompt (soul) activo                           |
+| `/reloadsoul`     | Recargar el soul desde el archivo                            |
+| `/skip`           | Saltar el soul en la próxima respuesta                       |
+| `/remember`       | Guardar un dato en la memoria persistente del bot            |
+| `/memories`       | Ver todas las memorias guardadas                             |
+| `/memories larga` | Ver la memoria de largo plazo (LTM)                          |
+| `/forget`         | Borrar una memoria                                           |
+| `/policy`         | Ver y editar las políticas de comportamiento de los agentes  |
 
 ### Voz y audio (TTS)
 
@@ -703,8 +709,11 @@ npm start
 | `SOUL_PATH`                   | `./data/SOUL.md`                   | Path to the soul file (bot personality)                            |
 | `MEMORY_INJECT`               | `recent`                           | Memory injection mode: `recent` \| `all` \| `none`                 |
 | `MEMORY_INJECT_LIMIT`         | `2000`                             | Max chars of memories to inject into context                       |
-| `HISTORY_WINDOW`              | `6`                                | Message pairs to keep in context history                           |
+| `HISTORY_WINDOW`              | `10`                               | Message pairs in the active context window (STM)                   |
 | `SESSION_TTL_HOURS`           | `0`                                | Inactivity hours before session expires (0 = never)                |
+| `LTM_ENABLED`                 | `true`                             | Automatic LTM compaction of conversations                          |
+| `LTM_MAX_CHARS`               | `4000`                             | Max LTM file size in chars before re-summarizing                   |
+| `LTM_COMPACT_TIMEOUT_SECONDS` | `30`                               | Timeout for the compaction call to the agent (seconds)             |
 | `WHISPER_MODEL`               | `mlx-community/whisper-base-mlx`   | Whisper model for audio transcription                              |
 | `WHISPER_LANGUAGE`            | `es`                               | Language hint for Whisper (`es`, `en`, etc.)                       |
 | `AUDIO_TEMP_DIR`              | `/tmp/krakbot-audio`               | Temp directory for audio files                                     |
@@ -774,22 +783,25 @@ npm start
 
 ### Session & history
 
-| Command    | Description                        |
-|------------|------------------------------------|
-| `/session` | View current session info          |
-| `/clear`   | Clear conversation history         |
+| Command       | Description                                                              |
+|---------------|--------------------------------------------------------------------------|
+| `/session`    | View current session info                                                |
+| `/cost`       | View estimated token cost for the session, broken down by agent          |
+| `/clear`      | Clear conversation history (LTM is preserved)                            |
+| `/clear ltm`  | Clear history **and** long-term memory                                   |
 
 ### Soul & memory
 
-| Command       | Description                                      |
-|---------------|--------------------------------------------------|
-| `/soul`       | View the active system prompt (soul)             |
-| `/reloadsoul` | Reload the soul from file without restarting     |
-| `/skip`       | Skip the soul for the next response              |
-| `/remember`   | Save a piece of information to persistent memory |
-| `/memories`   | List all saved memories                          |
-| `/forget`     | Delete a memory                                  |
-| `/policy`     | View and edit agent behavior policies            |
+| Command           | Description                                      |
+|-------------------|--------------------------------------------------|
+| `/soul`           | View the active system prompt (soul)             |
+| `/reloadsoul`     | Reload the soul from file without restarting     |
+| `/skip`           | Skip the soul for the next response              |
+| `/remember`       | Save a piece of information to persistent memory |
+| `/memories`       | List all saved memories                          |
+| `/memories larga` | View your long-term memory (LTM)                 |
+| `/forget`         | Delete a memory                                  |
+| `/policy`         | View and edit agent behavior policies            |
 
 ### Voice & audio (TTS)
 
