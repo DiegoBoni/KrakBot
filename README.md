@@ -798,10 +798,10 @@ npm start
 | `/reloadsoul`     | Reload the soul from file without restarting     |
 | `/skip`           | Skip the soul for the next response              |
 | `/remember`       | Save a piece of information to persistent memory |
-| `/memories`       | List all saved memories                          |
-| `/memories larga` | View your long-term memory (LTM)                 |
-| `/forget`         | Delete a memory                                  |
-| `/policy`         | View and edit agent behavior policies            |
+| `/memories`     | List all saved memories                          |
+| `/memories ltm` | View your long-term memory (LTM)                 |
+| `/forget`       | Delete a memory                                  |
+| `/policy`       | View and edit agent behavior policies            |
 
 ### Voice & audio (TTS)
 
