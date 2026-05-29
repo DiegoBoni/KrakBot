@@ -75,6 +75,9 @@ async function main() {
 
   const bot = createBot()
 
+  const { createGateway } = require('./gateway/index')
+  const gateway = createGateway()
+
   // Mark any in-flight team tasks as interrupted (bot was restarted)
   const interrupted = taskManager.markInterrupted()
   if (interrupted.length > 0) {
@@ -110,6 +113,7 @@ async function main() {
     logger.info(`${signal} recibido — apagando bot...`)
     heartbeatManager.stopAll()
     clearInterval(cleanupInterval)
+    if (gateway) gateway.shutdown()
     bot.stop(signal)
     process.exit(0)
   }

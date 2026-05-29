@@ -166,6 +166,25 @@ WHISPER_LANGUAGE=${config.whisperLanguage || 'es'}
 AUDIO_TEMP_DIR=/tmp/krakbot-audio
 MAX_AUDIO_SIZE_MB=25
 ` : ''
+
+  const httpBlock = config.httpEnabled ? `
+# HTTP Gateway
+HTTP_PORT=${config.httpPort || '3000'}
+HTTP_HOST=${config.httpHost || '127.0.0.1'}
+HTTP_API_KEY=${config.httpApiKey || ''}
+HTTP_AGENT_ALLOWLIST=${config.httpAgentAllowlist || ''}
+HTTP_MAX_CONCURRENT=${config.httpMaxConcurrent || '3'}
+HTTP_TASK_TTL_HOURS=${config.httpTaskTtlHours || '2'}
+` : `
+# HTTP Gateway (deshabilitado — configurá HTTP_PORT para activar)
+# HTTP_PORT=3000
+# HTTP_HOST=127.0.0.1
+# HTTP_API_KEY=
+# HTTP_AGENT_ALLOWLIST=
+# HTTP_MAX_CONCURRENT=3
+# HTTP_TASK_TTL_HOURS=2
+`
+
   return `# Generado por KrakBot Installer — ${ts}
 
 TELEGRAM_TOKEN=${config.token || ''}
@@ -195,7 +214,7 @@ MEMORY_INJECT_LIMIT=2000
 # Conversational memory
 HISTORY_WINDOW=6
 SESSION_TTL_HOURS=0
-${audioBlock}
+${audioBlock}${httpBlock}
 # Auto-update desde GitHub
 GITHUB_REPO=DiegoBoni/KrakBot
 GITHUB_BRANCH=main
@@ -454,6 +473,18 @@ async function router(req, res, port) {
 
     res.write('data: __DONE__\n\n')
     res.end()
+    return
+  }
+
+  // ── GET /api/tailscale-ip ───────────────────────────────────────────────────
+  if (method === 'GET' && pathname === '/api/tailscale-ip') {
+    try {
+      const ip = execSync('tailscale ip -4', { stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000 })
+        .toString().trim().split('\n')[0]
+      sendJSON(res, { found: true, ip })
+    } catch {
+      sendJSON(res, { found: false, ip: null })
+    }
     return
   }
 

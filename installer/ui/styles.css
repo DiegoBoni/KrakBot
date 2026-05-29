@@ -713,6 +713,32 @@ details .details-body {
   min-width: 4.5rem;
 }
 
+/* ─── Shortcut var cards ─────────────────────────────────────────────────────── */
+.shortcut-var-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.875rem 1rem;
+}
+
+.shortcut-var-label {
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.8rem;
+  color: var(--accent-cyan);
+  background: rgba(0, 229, 204, 0.08);
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.25rem;
+}
+
+.shortcut-var-desc {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 0.1rem;
+}
+
 /* ─── Responsive ─────────────────────────────────────────────────────────────── */
 @media (max-width: 600px) {
   .agents-grid {

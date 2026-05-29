@@ -101,6 +101,7 @@ const {
   // Team callbacks + feedback
   handleTeamCallback,
   handlePendingReviewFeedback,
+  handleConfigGateway,
   handleTextIfActive,
 } = require('./handlers')
 const buildTeamWizard = require('../workflows/buildTeamWizard')
@@ -137,6 +138,10 @@ function createBot() {
         if (session.buildTeamFlow) {
           session.buildTeamFlow = null
           logger.debug(`buildTeamFlow cancelled for user ${userId} (command received)`)
+        }
+        if (session.configGatewayFlow) {
+          session.configGatewayFlow = null
+          logger.debug(`configGatewayFlow cancelled for user ${userId} (command received)`)
         }
       }
     }
@@ -190,6 +195,9 @@ function createBot() {
   bot.command('voicemode', handleVoiceMode)
   bot.command('ttsbutton', handleTtsButton)
   bot.command('ttsvoice',  handleTtsVoice)
+
+  // HTTP Gateway config
+  bot.command('config_gateway', handleConfigGateway)
 
   // Send file command
   bot.command('sendfile', handleSendFile)

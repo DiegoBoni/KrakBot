@@ -31,3 +31,4 @@ data/team-tasks.json
 
 # macOS metadata
 .DS_Store
+data/logs/

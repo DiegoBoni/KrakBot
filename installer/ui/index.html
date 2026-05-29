@@ -326,6 +326,103 @@
           </div>
         </div>
 
+        <!-- ── HTTP Gateway ─────────────────────────────────────────────────── -->
+        <div class="section-title" style="margin-top:1.5rem;">HTTP Gateway</div>
+        <p style="font-size:0.875rem; color:var(--text-muted);">
+          Expone una API REST local para que otras apps (n8n, iOS Shortcuts, scripts) llamen a KrakBot directamente.
+        </p>
+
+        <div class="toggle-row" style="margin-top:0.75rem;">
+          <label class="toggle">
+            <input type="checkbox" id="http-enabled-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+          <span style="font-size:0.875rem;">Activar HTTP Gateway</span>
+        </div>
+
+        <div id="http-gateway-config" hidden style="margin-top:1rem;">
+
+          <div class="input-group">
+            <label for="http-port">
+              Puerto
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon">?</span>
+                <span class="tooltip-box">Puerto en el que escucha el gateway. Por defecto 3000.</span>
+              </span>
+            </label>
+            <input type="number" id="http-port" value="3000" min="1024" max="65535" placeholder="3000">
+          </div>
+
+          <div class="input-group" style="margin-top:0.75rem;">
+            <label for="http-host">
+              Host / IP de escucha
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon">?</span>
+                <span class="tooltip-box">127.0.0.1 = solo local. 0.0.0.0 = todas las interfaces (requiere API Key). Usá la IP de Tailscale para exponer solo en tu red privada.</span>
+              </span>
+            </label>
+            <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+              <input type="text" id="http-host" value="127.0.0.1" placeholder="127.0.0.1" style="flex:1; min-width:160px;">
+              <button class="btn btn-secondary btn-sm" id="btn-detect-tailscale" type="button">
+                🐾 Detectar IP Tailscale
+              </button>
+            </div>
+            <div id="tailscale-status" style="font-size:0.8rem; margin-top:0.35rem; color:var(--text-muted);"></div>
+          </div>
+
+          <div class="input-group" style="margin-top:0.75rem;">
+            <label for="http-api-key">
+              API Key
+              <span class="tooltip-wrap">
+                <span class="tooltip-icon">?</span>
+                <span class="tooltip-box">Clave secreta que deben enviar los clientes en el header X-API-Key. Si el host es 0.0.0.0 la API Key es obligatoria.</span>
+              </span>
+            </label>
+            <div class="input-wrap">
+              <input type="password" id="http-api-key" placeholder="clave-secreta" autocomplete="off" spellcheck="false">
+              <button class="btn-eye" id="btn-toggle-apikey" type="button" title="Mostrar/ocultar API key" aria-label="Mostrar API key">👁</button>
+            </div>
+            <div class="input-feedback" id="apikey-feedback"></div>
+          </div>
+
+          <details style="margin-top:1rem;">
+            <summary style="cursor:pointer; font-size:0.875rem;">Opciones avanzadas del gateway</summary>
+            <div class="details-body">
+
+              <div class="input-group" style="margin-top:0.75rem;">
+                <label for="http-agent-allowlist">
+                  Agentes permitidos
+                  <span class="tooltip-wrap">
+                    <span class="tooltip-icon">?</span>
+                    <span class="tooltip-box">Comma-separated. Ej: claude,gemini. Si está vacío, todos los agentes son válidos.</span>
+                  </span>
+                </label>
+                <input type="text" id="http-agent-allowlist" placeholder="claude,gemini (vacío = todos)">
+              </div>
+
+              <div class="input-group" style="margin-top:0.75rem;">
+                <label for="http-max-concurrent">Tareas concurrentes máximas</label>
+                <input type="number" id="http-max-concurrent" value="3" min="1" max="20">
+              </div>
+
+              <div class="input-group" style="margin-top:0.75rem;">
+                <label for="http-task-ttl">TTL de tareas en memoria (horas)</label>
+                <input type="number" id="http-task-ttl" value="2" min="1" max="48">
+              </div>
+
+            </div>
+          </details>
+
+          <div class="banner-warning" id="http-no-apikey-warning" hidden style="margin-top:0.75rem;">
+            ⚠️ <strong>Sin API Key configurada</strong> — el gateway sólo escuchará en <code>127.0.0.1</code>. Si querés exponerlo en Tailscale o en red, agregá una API Key.
+          </div>
+
+          <div class="banner-warning" id="http-public-no-key-error" hidden style="margin-top:0.75rem;">
+            ❌ <strong>Configuración insegura</strong> — No podés usar <code>0.0.0.0</code> sin API Key. Cambiá el host o agregá una clave.
+          </div>
+
+        </div><!-- /#http-gateway-config -->
+
         <div class="btn-row">
           <button class="btn btn-secondary" id="btn-step6-back">← Volver</button>
           <button class="btn btn-primary" id="btn-step6-next">Siguiente →</button>
@@ -410,6 +507,42 @@
             </div>
           </div>
         </div>
+
+        <!-- ── Atajo iOS ──────────────────────────────────────────────────────── -->
+        <div id="shortcut-section" hidden style="margin-top:1.5rem;">
+          <div class="section-title">Configurar atajo de iPhone / iPad</div>
+          <p style="font-size:0.875rem; margin-top:0.25rem; color:var(--text-muted);">
+            Importá el atajo de KrakBot y reemplazá los dos valores de abajo cuando te los pida.
+          </p>
+
+          <ol style="font-size:0.875rem; margin-top:0.75rem; padding-left:1.2rem; line-height:1.8;">
+            <li>Abrí el atajo de KrakBot en tu iPhone (link de iCloud que te compartieron)</li>
+            <li>Tap en <strong>Agregar atajo</strong></li>
+            <li>El atajo te va a pedir dos valores — copiá cada uno con el botón de abajo</li>
+          </ol>
+
+          <div style="margin-top:1rem; display:flex; flex-direction:column; gap:0.75rem;">
+
+            <div class="shortcut-var-card">
+              <div class="shortcut-var-label">TU_IP_AQUI</div>
+              <div class="shortcut-var-desc">URL del gateway (incluye puerto y ruta)</div>
+              <div class="cmd-row" style="margin-top:0.4rem;">
+                <code id="shortcut-url-value" style="flex:1; word-break:break-all; font-size:0.85rem;">—</code>
+                <button class="btn btn-secondary btn-sm" id="btn-copy-shortcut-url">Copiar</button>
+              </div>
+            </div>
+
+            <div class="shortcut-var-card">
+              <div class="shortcut-var-label">TU_API_KEY_AQUI</div>
+              <div class="shortcut-var-desc">La API Key que configuraste en el paso 6</div>
+              <div class="cmd-row" style="margin-top:0.4rem;">
+                <code id="shortcut-apikey-value" style="flex:1; word-break:break-all; font-size:0.85rem;">—</code>
+                <button class="btn btn-secondary btn-sm" id="btn-copy-shortcut-apikey">Copiar</button>
+              </div>
+            </div>
+
+          </div>
+        </div><!-- /#shortcut-section -->
 
         <div class="btn-row" style="margin-top:1.25rem;">
           <a class="btn btn-primary" id="btn-open-bot" href="#" target="_blank" rel="noopener" hidden>

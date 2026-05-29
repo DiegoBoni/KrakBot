@@ -11,6 +11,13 @@ const state = {
     geminiModel: 'gemini-2.5-pro',
     codexModel: '',
     debug: false,
+    httpEnabled: false,
+    httpPort: '3000',
+    httpHost: '127.0.0.1',
+    httpApiKey: '',
+    httpAgentAllowlist: '',
+    httpMaxConcurrent: '3',
+    httpTaskTtlHours: '2',
   },
   cliStatus: { claude: null, gemini: null, codex: null },
   envExists: false,
@@ -19,6 +26,7 @@ const state = {
   botUsername: null,
   isAppleSilicon: false,
   audioTools: { ffmpeg: false, mlxWhisper: false },
+  tailscaleIp: null,
 }
 
 // Detect port from current URL (bootstrap may use 7337-7339)
@@ -406,7 +414,61 @@ function setupInstallAudio(key, tool) {
 }
 
 // ─── Step 6: Config ───────────────────────────────────────────────────────────
-function enterStep6() {}
+function enterStep6() {
+  if (state.envExists) {
+    loadExistingHttpEnv()
+  }
+  validateHttpConfig()
+}
+
+async function loadExistingHttpEnv() {
+  try {
+    const res = await fetch(`${BASE}/api/env-current`)
+    const env = await res.json()
+
+    if (env.HTTP_PORT) {
+      $('http-port').value = env.HTTP_PORT
+      $('http-enabled-toggle').checked = true
+      $('http-gateway-config').hidden = false
+    }
+    if (env.HTTP_HOST) $('http-host').value = env.HTTP_HOST
+    if (env.HTTP_AGENT_ALLOWLIST) $('http-agent-allowlist').value = env.HTTP_AGENT_ALLOWLIST
+    if (env.HTTP_MAX_CONCURRENT) $('http-max-concurrent').value = env.HTTP_MAX_CONCURRENT
+    if (env.HTTP_TASK_TTL_HOURS) $('http-task-ttl').value = env.HTTP_TASK_TTL_HOURS
+  } catch {}
+}
+
+function validateHttpConfig() {
+  const host = $('http-host').value.trim()
+  const apiKey = $('http-api-key').value.trim()
+  const noKeyWarning = $('http-no-apikey-warning')
+  const publicNoKeyError = $('http-public-no-key-error')
+  const apikeyFeedback = $('apikey-feedback')
+  const nextBtn = $('btn-step6-next')
+
+  const isEnabled = $('http-enabled-toggle').checked
+  if (!isEnabled) {
+    noKeyWarning.hidden = true
+    publicNoKeyError.hidden = true
+    nextBtn.disabled = false
+    return
+  }
+
+  const isPublic = host === '0.0.0.0'
+  const hasKey = apiKey.length > 0
+
+  noKeyWarning.hidden = hasKey || isPublic
+  publicNoKeyError.hidden = !(isPublic && !hasKey)
+  nextBtn.disabled = isPublic && !hasKey
+
+  if (hasKey) {
+    apikeyFeedback.textContent = '✅ API Key configurada'
+    apikeyFeedback.className = 'input-feedback ok'
+  } else {
+    apikeyFeedback.textContent = ''
+    apikeyFeedback.className = 'input-feedback'
+  }
+}
 
 // ─── Step 7: Resumen ──────────────────────────────────────────────────────────
 function enterStep7() {
@@ -424,6 +486,11 @@ function enterStep7() {
     ['Modelo Codex', config.codexModel || 'default CLI'],
     ['Debug', config.debug ? 'Activado' : 'Desactivado'],
     ...(config.includeAudio ? [['Audio (Whisper)', `${config.whisperModel} — idioma: ${config.whisperLanguage}`]] : []),
+    ['HTTP Gateway', config.httpEnabled ? `✅ ${config.httpHost}:${config.httpPort}` : 'Desactivado'],
+    ...(config.httpEnabled ? [
+      ['API Key', config.httpApiKey ? '✅ Configurada' : '⚠️ Sin API Key (solo localhost)'],
+      ...(config.httpAgentAllowlist ? [['Agentes permitidos', config.httpAgentAllowlist]] : []),
+    ] : []),
   ]
 
   summary.innerHTML = items.map(([k, v]) =>
@@ -435,6 +502,7 @@ function enterStep7() {
 }
 
 function buildConfig() {
+  const httpEnabled = $('http-enabled-toggle').checked
   return {
     token:          $('telegram-token').value.trim() || state.config.token,
     authorizedUsers: $('authorized-users').value.trim(),
@@ -446,6 +514,13 @@ function buildConfig() {
     includeAudio:   state.isAppleSilicon && state.audioTools.mlxWhisper,
     whisperLanguage: 'es',
     whisperModel:   'mlx-community/whisper-base-mlx',
+    httpEnabled,
+    httpPort:            httpEnabled ? ($('http-port').value.trim() || '3000') : '',
+    httpHost:            httpEnabled ? ($('http-host').value.trim() || '127.0.0.1') : '',
+    httpApiKey:          httpEnabled ? $('http-api-key').value.trim() : '',
+    httpAgentAllowlist:  httpEnabled ? ($('http-agent-allowlist').value.trim() || '') : '',
+    httpMaxConcurrent:   httpEnabled ? ($('http-max-concurrent').value.trim() || '3') : '',
+    httpTaskTtlHours:    httpEnabled ? ($('http-task-ttl').value.trim() || '2') : '',
   }
 }
 
@@ -465,6 +540,20 @@ WHISPER_MODEL=${config.whisperModel}
 WHISPER_LANGUAGE=${config.whisperLanguage}
 AUDIO_TEMP_DIR=/tmp/krakbot-audio
 MAX_AUDIO_SIZE_MB=25` : ''
+
+  const httpBlock = config.httpEnabled ? `
+
+# HTTP Gateway
+HTTP_PORT=${config.httpPort}
+HTTP_HOST=${config.httpHost}
+HTTP_API_KEY=${config.httpApiKey ? '****' : ''}
+HTTP_AGENT_ALLOWLIST=${config.httpAgentAllowlist || ''}
+HTTP_MAX_CONCURRENT=${config.httpMaxConcurrent}
+HTTP_TASK_TTL_HOURS=${config.httpTaskTtlHours}` : `
+
+# HTTP Gateway (deshabilitado)
+# HTTP_PORT=3000`
+
   return `# Generado por KrakBot Installer — ${ts}
 
 TELEGRAM_TOKEN=${maskToken(config.token)}
@@ -493,7 +582,7 @@ MEMORY_INJECT_LIMIT=2000
 
 # Conversational memory
 HISTORY_WINDOW=6
-SESSION_TTL_HOURS=0${audioBlock}
+SESSION_TTL_HOURS=0${audioBlock}${httpBlock}
 
 # Auto-update desde GitHub
 GITHUB_REPO=DiegoBoni/KrakBot
@@ -601,8 +690,26 @@ async function enterStep8() {
         btnBot.href = `https://t.me/${state.botUsername}`
         btnBot.hidden = false
       }
+
+      setupShortcutSection()
     }
   )
+}
+
+function setupShortcutSection() {
+  const config = state.config
+  if (!config.httpEnabled || !config.httpPort) return
+
+  const url = `http://${config.httpHost}:${config.httpPort}/message`
+  const apiKey = config.httpApiKey || '(sin API Key)'
+
+  $('shortcut-url-value').textContent = url
+  $('shortcut-apikey-value').textContent = apiKey
+
+  $('btn-copy-shortcut-url').addEventListener('click', () => copyToClipboard(url))
+  $('btn-copy-shortcut-apikey').addEventListener('click', () => copyToClipboard(config.httpApiKey || ''))
+
+  $('shortcut-section').hidden = false
 }
 
 async function fetchBotUsername(token) {
@@ -722,6 +829,50 @@ async function init() {
   // Step 6 — Config
   $('btn-step6-back').addEventListener('click', () => goToStep(5))
   $('btn-step6-next').addEventListener('click', () => goToStep(7))
+
+  $('http-enabled-toggle').addEventListener('change', () => {
+    $('http-gateway-config').hidden = !$('http-enabled-toggle').checked
+    validateHttpConfig()
+  })
+
+  $('btn-detect-tailscale').addEventListener('click', async () => {
+    const btn = $('btn-detect-tailscale')
+    const statusEl = $('tailscale-status')
+    btn.disabled = true
+    btn.textContent = 'Detectando...'
+    statusEl.textContent = ''
+
+    try {
+      const res = await fetch(`${BASE}/api/tailscale-ip`)
+      const data = await res.json()
+      if (data.found && data.ip) {
+        state.tailscaleIp = data.ip
+        $('http-host').value = data.ip
+        statusEl.textContent = `✅ IP de Tailscale detectada: ${data.ip}`
+        statusEl.style.color = 'var(--accent-green, #4ade80)'
+      } else {
+        statusEl.textContent = '⚠️ Tailscale no encontrado o sin IP asignada.'
+        statusEl.style.color = 'var(--accent-yellow, #facc15)'
+      }
+    } catch {
+      statusEl.textContent = '❌ Error al consultar Tailscale.'
+      statusEl.style.color = 'var(--accent-red, #f87171)'
+    }
+
+    btn.disabled = false
+    btn.textContent = '🐾 Detectar IP Tailscale'
+    validateHttpConfig()
+  })
+
+  $('btn-toggle-apikey').addEventListener('click', () => {
+    const input = $('http-api-key')
+    const isPass = input.type === 'password'
+    input.type = isPass ? 'text' : 'password'
+    $('btn-toggle-apikey').textContent = isPass ? '🙈' : '👁'
+  })
+
+  $('http-host').addEventListener('input', validateHttpConfig)
+  $('http-api-key').addEventListener('input', validateHttpConfig)
 
   // Step 7 — Resumen
   $('btn-step7-back').addEventListener('click', () => goToStep(6))
