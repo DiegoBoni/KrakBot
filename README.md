@@ -92,6 +92,12 @@ npm start
 | `RATE_LIMIT_MAX`            | `10`                               | Máximo de requests por usuario por ventana (0 = deshabilitado)|
 | `RATE_LIMIT_WINDOW_SECONDS` | `60`                               | Duración de la ventana de rate limiting en segundos          |
 | `CHILD_ENV_EXTRA`           | —                                  | Variables extra a pasar al proceso CLI hijo (`KEY=VALUE,KEY2=VALUE2` o solo `KEY` para heredar del env del bot) |
+| `HTTP_PORT`                 | —                                  | Puerto del HTTP Gateway (descomentá para activarlo; sin este var, el gateway no arranca) |
+| `HTTP_HOST`                 | `127.0.0.1`                        | IP de bind. Usá `0.0.0.0` con Tailscale para acceso desde otros dispositivos |
+| `HTTP_API_KEY`              | —                                  | Clave de autenticación para el gateway. **Obligatoria** si `HTTP_HOST` no es localhost |
+| `HTTP_AGENT_ALLOWLIST`      | (vacío)                            | Agentes permitidos vía HTTP, separados por coma (ej: `claude,gemini`). Vacío = todos |
+| `HTTP_MAX_CONCURRENT`       | `3`                                | Máximo de ejecuciones de agentes en paralelo vía HTTP |
+| `HTTP_TASK_TTL_HOURS`       | `2`                                | Horas antes de que las tareas completadas se purguen de memoria |
 
 ---
 
@@ -177,12 +183,13 @@ npm start
 
 ### Utilidades
 
-| Comando    | Descripción                                 |
-|------------|---------------------------------------------|
-| `/start`   | Bienvenida e instrucciones                  |
-| `/ayuda`   | Instrucciones de uso                        |
-| `/ping`    | Health check de los agentes CLI             |
-| `/update`  | Chequear actualizaciones disponibles        |
+| Comando             | Descripción                                          |
+|---------------------|------------------------------------------------------|
+| `/start`            | Bienvenida e instrucciones                           |
+| `/ayuda`            | Instrucciones de uso                                 |
+| `/ping`             | Health check de los agentes CLI                      |
+| `/update`           | Chequear actualizaciones disponibles                 |
+| `/config_gateway`   | Configurar el HTTP Gateway desde el chat (puerto, host, API Key) |
 
 ---
 
@@ -509,6 +516,12 @@ src/
 │   ├── textSanitizer.js      # Limpieza de markdown antes de enviar a TTS
 │   ├── fileManager.js        # Descarga, validación, lectura y limpieza de archivos adjuntos
 │   └── updateChecker.js      # Auto-updater desde GitHub
+├── gateway/
+│   ├── index.js              # createGateway() — arranca el servidor HTTP (opt-in vía HTTP_PORT)
+│   ├── routes.js             # Router manual: POST /message, GET /task/:id, SSE, POST /session, GET /health
+│   ├── taskQueue.js          # Store de tareas HTTP en memoria + worker loop async
+│   ├── auth.js               # Middleware de API key (constant-time compare)
+│   └── sse.js                # Helpers para Server-Sent Events
 ├── workflows/
 │   ├── buildTeamWizard.js    # Wizard interactivo para crear equipos asistido por IA
 │   └── teamWorkflow.js       # Orquestación del flujo coordinator → worker → reviewer
@@ -601,6 +614,115 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ### Políticas de comportamiento
 
 Las políticas son archivos Markdown en `data/policies/` que se inyectan en el contexto de cada llamada al agente como bloque `[POLICY]`. Permiten definir restricciones de comportamiento sin tocar el código. Ver sección **Políticas de comportamiento** más abajo.
+
+---
+
+## HTTP Gateway
+
+KrakBot expone una API HTTP local que permite a sistemas externos (n8n, iOS Shortcuts, scripts, dashboards) interactuar con los agentes sin pasar por Telegram.
+
+> El gateway es **opt-in**: solo arranca si configurás `HTTP_PORT` en el `.env`. Sin esa variable, el bot funciona exactamente igual que antes.
+
+### Configuración rápida
+
+**Solo localhost** (scripts locales, mismo equipo):
+```env
+HTTP_PORT=3000
+```
+
+**Con Tailscale** (acceso desde n8n, iPhone, otro dispositivo):
+```env
+HTTP_PORT=3000
+HTTP_HOST=0.0.0.0
+HTTP_API_KEY=tu-clave-secreta-aqui
+```
+
+Generá una clave segura con:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+### Endpoints
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `GET`  | `/health` | Health check — sin auth |
+| `POST` | `/session` | Crear sesión persistente |
+| `POST` | `/message` | Enviar mensaje al agente |
+| `GET`  | `/task/:id` | Consultar estado de una tarea |
+| `GET`  | `/task/:id/stream` | Stream en tiempo real (SSE) |
+
+### Flujo básico (fire-and-poll)
+
+```bash
+# 1. Enviar mensaje
+curl -X POST http://localhost:3000/message \
+  -H "X-API-Key: tu-clave" \
+  -H "Content-Type: application/json" \
+  -d '{"agent":"claude","message":"hola"}'
+# → {"task_id":"A1B2C3D4","session_id":"http:...","status":"accepted"}
+
+# 2. Consultar resultado
+curl http://localhost:3000/task/A1B2C3D4 \
+  -H "X-API-Key: tu-clave"
+# → {"status":"done","output":"¡Hola! ¿En qué puedo ayudarte?"}
+```
+
+### Sesiones persistentes (multi-turn)
+
+```bash
+# Crear sesión
+curl -X POST http://localhost:3000/session \
+  -H "X-API-Key: tu-clave" \
+  -H "Content-Type: application/json" \
+  -d '{"agent":"claude"}'
+# → {"session_id":"http:uuid","agent":"claude"}
+
+# Reutilizar en mensajes siguientes
+curl -X POST http://localhost:3000/message \
+  -H "X-API-Key: tu-clave" \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"http:uuid","message":"mi nombre es Boni"}'
+```
+
+### Streaming (SSE)
+
+```bash
+curl -N http://localhost:3000/task/A1B2C3D4/stream \
+  -H "X-API-Key: tu-clave"
+# data: {"type":"chunk","text":"¡Hola"}
+# data: {"type":"chunk","text":"! ¿En qué"}
+# data: {"type":"done","output":"¡Hola! ¿En qué puedo ayudarte?"}
+```
+
+### Configurar desde Telegram (usuarios existentes)
+
+Si ya tenés el bot corriendo y querés activar o reconfigurar el gateway sin tocar el `.env` manualmente:
+
+```
+/config_gateway
+```
+
+El bot te guía en 3 pasos por el chat: puerto → host/IP → API Key. Al confirmar, actualiza el `.env` y reinicia el bot con PM2 automáticamente. Si tenés Tailscale, el instalador detecta la IP automáticamente; desde Telegram, pegala en el paso 2.
+
+### iOS Shortcuts
+
+Importá el atajo de KrakBot y reemplazá los dos valores cuando te los pida:
+
+| Variable           | Valor                                      |
+|--------------------|--------------------------------------------|
+| `TU_IP_AQUI`       | `http://<tailscale-ip>:<puerto>/message`   |
+| `TU_API_KEY_AQUI`  | La API Key que configuraste                |
+
+El instalador muestra estos valores listos para copiar en el último paso (una vez que el bot arranca). También podés obtenerlos corriendo `/config_gateway` en el bot — el resumen muestra la URL completa.
+
+Configuración del bloque **"Obtener contenido de URL"**:
+
+1. **POST** a `http://<tailscale-ip>:3000/message` con cuerpo JSON `{ agent, message }` y header `X-API-Key`
+2. Extraer `task_id` del diccionario de respuesta
+3. **Esperar** 10 segundos
+4. **GET** a `http://<tailscale-ip>:3000/task/<task_id>` con el mismo header
+5. Extraer `output` del diccionario de respuesta
 
 ---
 
@@ -729,6 +851,12 @@ npm start
 | `RATE_LIMIT_MAX`              | `10`                               | Max requests per user per window (0 = disabled)                    |
 | `RATE_LIMIT_WINDOW_SECONDS`   | `60`                               | Rate limiting window duration in seconds                           |
 | `CHILD_ENV_EXTRA`             | —                                  | Extra variables to pass to the child CLI process (`KEY=VALUE,KEY2=VALUE2` or just `KEY` to inherit from bot env) |
+| `HTTP_PORT`                   | —                                  | HTTP Gateway port (set to enable it; without this var, the gateway does not start) |
+| `HTTP_HOST`                   | `127.0.0.1`                        | Bind IP. Use `0.0.0.0` with Tailscale for access from other devices |
+| `HTTP_API_KEY`                | —                                  | Authentication key for the gateway. **Required** if `HTTP_HOST` is not localhost |
+| `HTTP_AGENT_ALLOWLIST`        | (empty)                            | Comma-separated agents allowed via HTTP (e.g. `claude,gemini`). Empty = all |
+| `HTTP_MAX_CONCURRENT`         | `3`                                | Max parallel agent executions via HTTP |
+| `HTTP_TASK_TTL_HOURS`         | `2`                                | Hours before completed tasks are purged from memory |
 
 ---
 
@@ -814,12 +942,13 @@ npm start
 
 ### Utilities
 
-| Command    | Description                        |
-|------------|------------------------------------|
-| `/start`   | Welcome message and instructions   |
-| `/help`    | Usage instructions                 |
-| `/ping`    | Health check for CLI agents        |
-| `/update`  | Check for available updates        |
+| Command             | Description                                                            |
+|---------------------|------------------------------------------------------------------------|
+| `/start`            | Welcome message and instructions                                       |
+| `/help`             | Usage instructions                                                     |
+| `/ping`             | Health check for CLI agents                                            |
+| `/update`           | Check for available updates                                            |
+| `/config_gateway`   | Configure the HTTP Gateway from chat (port, host, API Key)             |
 
 ---
 
@@ -1147,6 +1276,12 @@ src/
 │   ├── textSanitizer.js      # Strips markdown before sending to TTS
 │   ├── fileManager.js        # File download, validation, reading and cleanup
 │   └── updateChecker.js      # Auto-updater from GitHub
+├── gateway/
+│   ├── index.js              # createGateway() — starts the HTTP server (opt-in via HTTP_PORT)
+│   ├── routes.js             # Manual router: POST /message, GET /task/:id, SSE, POST /session, GET /health
+│   ├── taskQueue.js          # In-memory HTTP task store + async worker loop
+│   ├── auth.js               # API key middleware (constant-time compare)
+│   └── sse.js                # Server-Sent Events helpers
 ├── workflows/
 │   ├── buildTeamWizard.js    # Interactive AI-assisted wizard for creating teams
 │   └── teamWorkflow.js       # Coordinator → worker → reviewer orchestration
@@ -1239,6 +1374,115 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ### Behavior policies
 
 Policies are Markdown files in `data/policies/` injected into every agent call as a `[POLICY]` block. They let you define behavioral constraints without touching code. See the **Behavior policies** section below.
+
+---
+
+## HTTP Gateway
+
+KrakBot exposes a local HTTP API that allows external systems (n8n, iOS Shortcuts, scripts, dashboards) to interact with the agents without going through Telegram.
+
+> The gateway is **opt-in**: it only starts if you set `HTTP_PORT` in `.env`. Without that variable, the bot behaves exactly as before.
+
+### Quick setup
+
+**Localhost only** (local scripts, same machine):
+```env
+HTTP_PORT=3000
+```
+
+**With Tailscale** (access from n8n, iPhone, another device):
+```env
+HTTP_PORT=3000
+HTTP_HOST=0.0.0.0
+HTTP_API_KEY=your-secret-key-here
+```
+
+Generate a secure key with:
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+### Endpoints
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| `GET`  | `/health` | Health check — no auth required |
+| `POST` | `/session` | Create a persistent session |
+| `POST` | `/message` | Send a message to an agent |
+| `GET`  | `/task/:id` | Poll task status |
+| `GET`  | `/task/:id/stream` | Real-time streaming (SSE) |
+
+### Basic flow (fire-and-poll)
+
+```bash
+# 1. Send message
+curl -X POST http://localhost:3000/message \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"agent":"claude","message":"hello"}'
+# → {"task_id":"A1B2C3D4","session_id":"http:...","status":"accepted"}
+
+# 2. Poll result
+curl http://localhost:3000/task/A1B2C3D4 \
+  -H "X-API-Key: your-key"
+# → {"status":"done","output":"Hello! How can I help you?"}
+```
+
+### Persistent sessions (multi-turn)
+
+```bash
+# Create session
+curl -X POST http://localhost:3000/session \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"agent":"claude"}'
+# → {"session_id":"http:uuid","agent":"claude"}
+
+# Reuse in subsequent messages
+curl -X POST http://localhost:3000/message \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"http:uuid","message":"my name is Boni"}'
+```
+
+### Streaming (SSE)
+
+```bash
+curl -N http://localhost:3000/task/A1B2C3D4/stream \
+  -H "X-API-Key: your-key"
+# data: {"type":"chunk","text":"Hello"}
+# data: {"type":"chunk","text":"! How can"}
+# data: {"type":"done","output":"Hello! How can I help you?"}
+```
+
+### Configure from Telegram (existing users)
+
+If the bot is already running and you want to enable or reconfigure the gateway without editing `.env` manually:
+
+```
+/config_gateway
+```
+
+The bot walks you through 3 steps in chat: port → host/IP → API Key. On confirmation it updates the `.env` and restarts the bot via PM2. If you use Tailscale, paste your Tailscale IP in step 2.
+
+### iOS Shortcuts
+
+Import the KrakBot shortcut and replace the two values when prompted:
+
+| Variable           | Value                                          |
+|--------------------|------------------------------------------------|
+| `TU_IP_AQUI`       | `http://<tailscale-ip>:<port>/message`         |
+| `TU_API_KEY_AQUI`  | The API Key you configured                     |
+
+The installer shows these values ready to copy in the final step (once the bot starts). You can also get them by running `/config_gateway` — the confirmation summary shows the full URL.
+
+Set up the **"Get contents of URL"** block:
+
+1. **POST** to `http://<tailscale-ip>:3000/message` with JSON body `{ agent, message }` and `X-API-Key` header
+2. Extract `task_id` from the response dictionary
+3. **Wait** 10 seconds
+4. **GET** `http://<tailscale-ip>:3000/task/<task_id>` with the same header
+5. Extract `output` from the response dictionary
 
 ---
 

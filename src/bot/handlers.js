@@ -19,6 +19,9 @@ const heartbeatManager = require('../utils/heartbeatManager')
 const teamWorkflow     = require('../workflows/teamWorkflow')
 const buildTeamWizard  = require('../workflows/buildTeamWizard')
 
+const { execSync } = require('child_process')
+const { upsertEnvKeys, readEnv } = require('../utils/envEditor')
+
 const MAX_RESPONSE_LENGTH = parseInt(process.env.MAX_RESPONSE_LENGTH) || 4000
 
 // Regex to detect "@agentAlias task" at the start of a message
@@ -1511,6 +1514,12 @@ async function handleTask(ctx, forcedText) {
   if (!soulManager.soulExists()) {
     sessionManager.startOnboarding(userId, text)
     return handleOnboarding(ctx, null)
+  }
+
+  // ─── configGatewayFlow text steps ─────────────────────────────────────────
+
+  if (session.configGatewayFlow) {
+    if (await handleConfigGatewayStep(ctx, text)) return
   }
 
   // ─── newAgentFlow text steps ───────────────────────────────────────────────
@@ -3149,6 +3158,153 @@ async function handleSendFile(ctx) {
   )
 }
 
+// ─── /config_gateway ──────────────────────────────────────────────────────────
+
+const GATEWAY_STEPS = ['ask_port', 'ask_host', 'ask_apikey', 'confirm']
+
+async function handleConfigGateway(ctx) {
+  const userId = ctx.from?.id
+  const session = sessionManager.getOrCreate(userId)
+  const current = readEnv()
+
+  session.configGatewayFlow = {
+    step: 'ask_port',
+    values: {
+      port:    current.HTTP_PORT    || '3000',
+      host:    current.HTTP_HOST    || '127.0.0.1',
+      apiKey:  current.HTTP_API_KEY || '',
+    },
+  }
+
+  const portHint = current.HTTP_PORT ? ` (actual: \`${current.HTTP_PORT}\`)` : ' (por defecto: `3000`)'
+  await ctx.reply(
+    `⚙️ *Configuración del HTTP Gateway*\n\n` +
+    `*Paso 1/3 — Puerto*${portHint}\n` +
+    `¿En qué puerto debe escuchar el gateway?\n\n` +
+    `_Enviá el número o \`-\` para mantener el valor actual._`,
+    { parse_mode: 'Markdown' }
+  )
+}
+
+async function handleConfigGatewayStep(ctx, text) {
+  const userId = ctx.from?.id
+  const session = sessionManager.getOrCreate(userId)
+  const flow = session.configGatewayFlow
+  if (!flow) return false
+
+  const input = text.trim()
+  const keep = input === '-' || input === ''
+
+  if (flow.step === 'ask_port') {
+    if (!keep) {
+      if (!/^\d{4,5}$/.test(input) || parseInt(input) < 1024 || parseInt(input) > 65535) {
+        await ctx.reply('⚠️ Puerto inválido. Ingresá un número entre 1024 y 65535, o `-` para mantener.')
+        return true
+      }
+      flow.values.port = input
+    }
+
+    flow.step = 'ask_host'
+    const hostHint = flow.values.host ? ` (actual: \`${flow.values.host}\`)` : ''
+    await ctx.reply(
+      `*Paso 2/3 — Host / IP*${hostHint}\n\n` +
+      `• \`127.0.0.1\` → solo acceso local\n` +
+      `• IP de Tailscale → acceso desde tus dispositivos\n` +
+      `• \`0.0.0.0\` → todas las interfaces (requiere API Key)\n\n` +
+      `_Enviá la IP o \`-\` para mantener._`,
+      { parse_mode: 'Markdown' }
+    )
+    return true
+  }
+
+  if (flow.step === 'ask_host') {
+    if (!keep) {
+      flow.values.host = input
+    }
+
+    flow.step = 'ask_apikey'
+    const keyHint = flow.values.apiKey ? ' (ya tenés una configurada)' : ' (opcional, recomendado)'
+    await ctx.reply(
+      `*Paso 3/3 — API Key*${keyHint}\n\n` +
+      `La clave que los clientes envían en el header \`X-API-Key\`.\n\n` +
+      `_Enviá la clave, \`-\` para mantener la actual, o \`vacío\` para dejarla sin clave._`,
+      { parse_mode: 'Markdown' }
+    )
+    return true
+  }
+
+  if (flow.step === 'ask_apikey') {
+    if (input.toLowerCase() === 'vacío' || input.toLowerCase() === 'vacio') {
+      flow.values.apiKey = ''
+    } else if (!keep) {
+      flow.values.apiKey = input
+    }
+
+    flow.step = 'confirm'
+    const { port, host, apiKey } = flow.values
+    const keyDisplay = apiKey ? `\`${apiKey.slice(0, 4)}****\`` : '_sin clave_'
+
+    await ctx.reply(
+      `📋 *Resumen de configuración*\n\n` +
+      `• Puerto: \`${port}\`\n` +
+      `• Host: \`${host}\`\n` +
+      `• API Key: ${keyDisplay}\n\n` +
+      `_Acceso desde atajo iOS: \`http://${host}:${port}/message\`_\n\n` +
+      `¿Confirmar y reiniciar el bot? Respondé \`si\` o \`no\`.`,
+      { parse_mode: 'Markdown' }
+    )
+    return true
+  }
+
+  if (flow.step === 'confirm') {
+    session.configGatewayFlow = null
+
+    if (input.toLowerCase() !== 'si' && input.toLowerCase() !== 'sí') {
+      await ctx.reply('❌ Configuración cancelada.')
+      return true
+    }
+
+    const { port, host, apiKey } = flow.values
+    const updates = {
+      HTTP_PORT: port,
+      HTTP_HOST: host,
+    }
+    if (apiKey !== undefined) updates.HTTP_API_KEY = apiKey
+
+    try {
+      upsertEnvKeys(updates)
+      // Update process.env in-memory so the gateway can pick it up on restart
+      process.env.HTTP_PORT    = port
+      process.env.HTTP_HOST    = host
+      process.env.HTTP_API_KEY = apiKey
+    } catch (err) {
+      await ctx.reply(`❌ Error al escribir el .env: ${err.message}`)
+      return true
+    }
+
+    await ctx.reply(
+      `✅ *Gateway configurado*\n\n` +
+      `• URL: \`http://${host}:${port}/message\`\n` +
+      `• API Key: ${apiKey ? `\`${apiKey.slice(0, 4)}****\`` : '_sin clave_'}\n\n` +
+      `Reiniciando con pm2...`,
+      { parse_mode: 'Markdown' }
+    )
+
+    // Restart via pm2 after a short delay so the reply lands first
+    setTimeout(() => {
+      try {
+        execSync('pm2 restart krakbot', { stdio: 'ignore' })
+      } catch (err) {
+        logger.error(`pm2 restart failed: ${err.message}`)
+      }
+    }, 1500)
+
+    return true
+  }
+
+  return false
+}
+
 module.exports = {
   handleStart,
   handleHelp,
@@ -3248,5 +3404,6 @@ module.exports = {
   // Team callbacks + feedback
   handleTeamCallback,
   handlePendingReviewFeedback,
+  handleConfigGateway,
   handleTextIfActive: buildTeamWizard.handleTextIfActive,
 }
