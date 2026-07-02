@@ -1,5 +1,10 @@
 require('dotenv').config()
 
+// El timeout por defecto de Happy Eyeballs (250ms) es demasiado corto para
+// alcanzar api.telegram.org en redes con latencia alta (p. ej. vía Tailscale)
+// y provoca ETIMEDOUT en getMe() al arrancar.
+require('net').setDefaultAutoSelectFamilyAttemptTimeout(3000)
+
 const { mkdirSync } = require('fs')
 const path = require('path')
 const { createBot } = require('./bot/index')
