@@ -9,6 +9,35 @@ const DEFAULT_MAX_SIZE_MB = 25
 const DEFAULT_MODEL = 'mlx-community/whisper-base-mlx'
 const DEFAULT_LANGUAGE = 'es'
 const WHISPER_TIMEOUT_MS = 120_000
+const FALLBACK_MODEL = process.env.WHISPER_FALLBACK_MODEL || 'base'
+
+function getWhisperEngines() {
+  return [
+    {
+      name: 'Whisper MLX',
+      command: process.env.WHISPER_MLX_BIN || 'mlx_whisper',
+      args: (audioPath, outputDir) => [
+        audioPath,
+        '--model', process.env.WHISPER_MODEL || DEFAULT_MODEL,
+        '--language', process.env.WHISPER_LANGUAGE || DEFAULT_LANGUAGE,
+        '--output-dir', outputDir,
+        '--output-format', 'txt',
+      ],
+    },
+    {
+      name: 'Whisper OpenAI',
+      command: process.env.WHISPER_FALLBACK_BIN || 'python3',
+      args: (audioPath, outputDir) => [
+        '-m', 'whisper',
+        audioPath,
+        '--model', FALLBACK_MODEL,
+        '--language', process.env.WHISPER_LANGUAGE || DEFAULT_LANGUAGE,
+        '--output_dir', outputDir,
+        '--output_format', 'txt',
+      ],
+    },
+  ]
+}
 
 function getTempDir() {
   return process.env.AUDIO_TEMP_DIR || DEFAULT_TEMP_DIR
@@ -49,32 +78,23 @@ function downloadFile(url, destPath) {
   })
 }
 
-function runWhisper(audioPath, outputDir) {
-  const model = process.env.WHISPER_MODEL || DEFAULT_MODEL
-  const language = process.env.WHISPER_LANGUAGE || DEFAULT_LANGUAGE
-
+function runWhisperEngine(engine, audioPath, outputDir) {
   return new Promise((resolve, reject) => {
-    const args = [
-      audioPath,
-      '--model', model,
-      '--language', language,
-      '--output-dir', outputDir,
-      '--output-format', 'txt',
-    ]
-    logger.debug(`Spawning: mlx_whisper ${args.join(' ')}`)
+    const args = engine.args(audioPath, outputDir)
+    logger.debug(`Spawning: ${engine.command} ${args.join(' ')}`)
 
     let stdout = ''
     let stderr = ''
     let settled = false
 
-    const child = spawn('mlx_whisper', args, { shell: false })
+    const child = spawn(engine.command, args, { shell: false })
 
     const timer = setTimeout(() => {
       if (settled) return
       settled = true
       child.kill('SIGTERM')
       setTimeout(() => child.kill('SIGKILL'), 2000)
-      reject(new Error('Timeout: mlx_whisper tardó más de 2 minutos.'))
+      reject(new Error(`Timeout: ${engine.name} tardó más de 2 minutos.`))
     }, WHISPER_TIMEOUT_MS)
 
     child.stdout.on('data', (c) => { stdout += c.toString() })
@@ -90,7 +110,7 @@ function runWhisper(audioPath, outputDir) {
       clearTimeout(timer)
       if (err.code === 'ENOENT') {
         reject(Object.assign(
-          new Error('mlx_whisper no está instalado o no está en PATH.'),
+          new Error(`${engine.name} no está instalado o no está en PATH.`),
           { isEnoent: true }
         ))
       } else {
@@ -103,13 +123,13 @@ function runWhisper(audioPath, outputDir) {
       settled = true
       clearTimeout(timer)
       if (code !== 0) {
-        logger.error(`[whisper] exit code ${code}\n${stderr}`)
+        logger.error(`[${engine.name}] exit code ${code}\n${stderr}`)
         reject(Object.assign(
-          new Error(`mlx_whisper salió con error (código ${code}). ${stderr.slice(-200)}`),
+          new Error(`${engine.name} salió con error (código ${code}). ${stderr.slice(-200)}`),
           { isWhisperError: true, exitCode: code }
         ))
       } else {
-        resolve({ stdout, stderr, code })
+        resolve({ stdout, stderr, code, engine: engine.name })
       }
     })
   })
@@ -150,24 +170,50 @@ async function transcribe(telegram, fileId) {
   logger.debug(`[audio] download OK — size=${stat?.size ?? 'unknown'} bytes`)
 
   try {
-    await runWhisper(tempFile, tempDir)
+    let lastError = null
+    const engines = getWhisperEngines()
 
-    let transcript = ''
+    for (let index = 0; index < engines.length; index += 1) {
+      const engine = engines[index]
+      try {
+        const whisperResult = await runWhisperEngine(engine, tempFile, tempDir)
 
-    try {
-      transcript = (await fs.promises.readFile(path.join(tempDir, `${baseName}.txt`), 'utf8')).trim()
-    } catch {
-      // no output file — treat as empty
+        let transcript = ''
+        try {
+          transcript = (await fs.promises.readFile(path.join(tempDir, `${baseName}.txt`), 'utf8')).trim()
+        } catch {
+          // no output file — treat as empty
+        }
+
+        if (!transcript) {
+          lastError = Object.assign(
+            new Error('No se pudo transcribir el audio. Verificá que haya voz clara en el mensaje.'),
+            { isEmpty: true, engine: engine.name }
+          )
+          if (index < engines.length - 1) {
+            logger.warn(`[${engine.name}] produjo salida vacía, intentando fallback`)
+            continue
+          }
+          throw lastError
+        }
+
+        return {
+          transcript,
+          engine: whisperResult.engine,
+          fallbackUsed: index > 0,
+          primaryEngine: engines[0].name,
+        }
+      } catch (err) {
+        lastError = err
+        if (index < engines.length - 1 && (err?.isEnoent || err?.isWhisperError || err?.isEmpty)) {
+          logger.warn(`[${engine.name}] falló, intentando fallback: ${err.message}`)
+          continue
+        }
+        throw err
+      }
     }
 
-    if (!transcript) {
-      throw Object.assign(
-        new Error('No se pudo transcribir el audio. Verificá que haya voz clara en el mensaje.'),
-        { isEmpty: true }
-      )
-    }
-
-    return transcript
+    throw lastError || new Error('No se pudo transcribir el audio.')
   } finally {
     // Always clean up temp files (audio + all whisper output formats)
     await fs.promises.unlink(tempFile).catch(() => {})
@@ -184,7 +230,7 @@ async function transcribe(telegram, fileId) {
 async function checkWhisper() {
   const start = Date.now()
   return new Promise((resolve) => {
-    const child = spawn('mlx_whisper', ['--help'], { shell: false })
+    const child = spawn(process.env.WHISPER_MLX_BIN || 'mlx_whisper', ['--help'], { shell: false })
     child.stdout.resume()
     child.stderr.resume()
     child.on('error', () => resolve({ found: false, latencyMs: Date.now() - start }))

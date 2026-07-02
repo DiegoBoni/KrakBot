@@ -2166,13 +2166,22 @@ async function handleVoice(ctx) {
       }
     }, 10_000)
 
-    transcript = await transcribe(ctx.telegram, voiceOrAudio.file_id)
+    const transcriptionResult = await transcribe(ctx.telegram, voiceOrAudio.file_id)
+    transcript = transcriptionResult.transcript
     clearInterval(heartbeatInterval)
     heartbeatInterval = null
 
     if (statusMsg) {
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {})
       statusMsg = null
+    }
+
+    if (transcriptionResult?.fallbackUsed) {
+      await ctx.reply(
+        `Cambié a ${transcriptionResult.engine}`
+      )
+    } else {
+      await ctx.reply(`Usando ${transcriptionResult.engine}`)
     }
   } catch (err) {
     clearInterval(heartbeatInterval)
