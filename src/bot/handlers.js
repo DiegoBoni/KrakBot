@@ -2150,6 +2150,8 @@ async function handleVoice(ctx) {
   let statusMsg = null
   let heartbeatInterval = null
 
+  let transcript = null
+
   try {
     statusMsg = await ctx.reply('🎙️ Transcribiendo...')
 
@@ -2164,16 +2166,39 @@ async function handleVoice(ctx) {
       }
     }, 10_000)
 
-    const transcript = await transcribe(ctx.telegram, voiceOrAudio.file_id)
+    transcript = await transcribe(ctx.telegram, voiceOrAudio.file_id)
     clearInterval(heartbeatInterval)
     heartbeatInterval = null
 
-    // Delete the status message — transcript passes internally, not shown to user
     if (statusMsg) {
       await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {})
       statusMsg = null
     }
+  } catch (err) {
+    clearInterval(heartbeatInterval)
+    heartbeatInterval = null
+    logger.error(`[voice] transcription error for user ${userId}: [${err?.constructor?.name}] ${err?.message || '(sin mensaje)'} code=${err?.code}`)
+    if (err?.stack) logger.debug(err.stack)
 
+    let msg = '❌ Error al transcribir el audio.'
+    if (err.isEnoent) {
+      msg = '⚠️ El motor de transcripción no está instalado. Pedile al operador que instale mlx-whisper.'
+    } else if (err.isSizeLimit) {
+      msg = err.message
+    } else if (err.isEmpty) {
+      msg = '⚠️ No se pudo transcribir el audio. Verificá que haya voz clara en el mensaje.'
+    } else if (err.isWhisperError) {
+      msg = '⚠️ El motor de transcripción falló. Intentá de nuevo.'
+    }
+
+    await ctx.reply(msg)
+    if (statusMsg) {
+      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {})
+    }
+    return
+  }
+
+  try {
     const response = await dispatch(null, transcript, session)
     sessionManager.addToHistory(userId, 'user', transcript)
     sessionManager.addToHistory(userId, 'assistant', response)
@@ -2195,30 +2220,15 @@ async function handleVoice(ctx) {
         const sent = await sendWithFallback(ctx, chunk)
         if (sent?.message_id) lastSentMsgId = sent.message_id
       }
-      // TTS button: attach inline keyboard to last message
       if (session.ttsButton && lastSentMsgId) {
         const ttsKeyboard = { inline_keyboard: [[{ text: '🔊 Escuchar', callback_data: 'tts_last' }]] }
         await ctx.telegram.editMessageReplyMarkup(ctx.chat.id, lastSentMsgId, undefined, ttsKeyboard).catch(() => {})
       }
     }
   } catch (err) {
-    clearInterval(heartbeatInterval)
-    logger.error(`Audio transcription failed for user ${userId}: ${err.message}`)
-
-    let msg = '❌ Error al transcribir el audio.'
-    if (err.isEnoent) {
-      msg = '⚠️ El motor de transcripción no está instalado. Pedile al operador que instale mlx-whisper.'
-    } else if (err.isSizeLimit) {
-      msg = err.message
-    } else if (err.isEmpty) {
-      msg = '⚠️ No se pudo transcribir el audio. Verificá que haya voz clara en el mensaje.'
-    }
-
-    await ctx.reply(msg)
-
-    if (statusMsg) {
-      await ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {})
-    }
+    logger.error(`[voice] dispatch error for user ${userId}: [${err?.constructor?.name}] ${err?.message || '(sin mensaje)'}`)
+    if (err?.stack) logger.debug(err.stack)
+    await ctx.reply('❌ Error al procesar la respuesta del agente.').catch(() => {})
   }
 }
 
