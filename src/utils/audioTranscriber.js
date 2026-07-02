@@ -29,17 +29,23 @@ function downloadFile(url, destPath) {
   return new Promise((resolve, reject) => {
     const file = fs.createWriteStream(destPath)
 
+    const cleanup = (err) => {
+      file.close()
+      fs.unlink(destPath, () => {})
+      reject(err)
+    }
+
     https.get(url, (res) => {
       if (res.statusCode !== 200) {
-        file.close()
-        fs.unlink(destPath, () => {})
-        reject(new Error(`HTTP ${res.statusCode} al descargar el audio`))
+        res.resume()
+        cleanup(new Error(`HTTP ${res.statusCode} al descargar el audio`))
         return
       }
+      res.on('error', cleanup)
       res.pipe(file)
       file.on('finish', () => { file.close(); resolve() })
-      file.on('error', (err) => { file.close(); fs.unlink(destPath, () => {}); reject(err) })
-    }).on('error', (err) => { file.close(); fs.unlink(destPath, () => {}); reject(err) })
+      file.on('error', cleanup)
+    }).on('error', cleanup)
   })
 }
 
@@ -53,6 +59,7 @@ function runWhisper(audioPath, outputDir) {
       '--model', model,
       '--language', language,
       '--output-dir', outputDir,
+      '--output-format', 'txt',
     ]
     logger.debug(`Spawning: mlx_whisper ${args.join(' ')}`)
 
@@ -95,8 +102,15 @@ function runWhisper(audioPath, outputDir) {
       if (settled) return
       settled = true
       clearTimeout(timer)
-      if (code !== 0) logger.error(`[whisper] exit code ${code}\n${stderr}`)
-      resolve({ stdout, stderr, code })
+      if (code !== 0) {
+        logger.error(`[whisper] exit code ${code}\n${stderr}`)
+        reject(Object.assign(
+          new Error(`mlx_whisper salió con error (código ${code}). ${stderr.slice(-200)}`),
+          { isWhisperError: true, exitCode: code }
+        ))
+      } else {
+        resolve({ stdout, stderr, code })
+      }
     })
   })
 }
@@ -110,7 +124,9 @@ function runWhisper(audioPath, outputDir) {
  * @returns {Promise<string>}
  */
 async function transcribe(telegram, fileId) {
+  logger.debug(`[audio] transcribe start — fileId=${fileId}`)
   const fileInfo = await telegram.getFile(fileId)
+  logger.debug(`[audio] getFile OK — path=${fileInfo.file_path} size=${fileInfo.file_size}`)
 
   const maxBytes = getMaxSizeBytes()
   if (fileInfo.file_size && fileInfo.file_size > maxBytes) {
@@ -128,24 +144,20 @@ async function transcribe(telegram, fileId) {
 
   const token = process.env.TELEGRAM_TOKEN
   const downloadUrl = `https://api.telegram.org/file/bot${token}/${fileInfo.file_path}`
+  logger.debug(`[audio] downloading to ${tempFile}`)
   await downloadFile(downloadUrl, tempFile)
+  const stat = await fs.promises.stat(tempFile).catch(() => null)
+  logger.debug(`[audio] download OK — size=${stat?.size ?? 'unknown'} bytes`)
 
   try {
     await runWhisper(tempFile, tempDir)
 
     let transcript = ''
 
-    // mlx_whisper outputs JSON by default; fall back to .txt if present
     try {
-      const jsonContent = await fs.promises.readFile(path.join(tempDir, `${baseName}.json`), 'utf8')
-      const parsed = JSON.parse(jsonContent)
-      transcript = (parsed.text || parsed.segments?.map((s) => s.text).join(' ') || '').trim()
+      transcript = (await fs.promises.readFile(path.join(tempDir, `${baseName}.txt`), 'utf8')).trim()
     } catch {
-      try {
-        transcript = (await fs.promises.readFile(path.join(tempDir, `${baseName}.txt`), 'utf8')).trim()
-      } catch {
-        // no output file — treat as empty
-      }
+      // no output file — treat as empty
     }
 
     if (!transcript) {
