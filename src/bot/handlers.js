@@ -2178,10 +2178,8 @@ async function handleVoice(ctx) {
 
     if (transcriptionResult?.fallbackUsed) {
       await ctx.reply(
-        `Cambié a ${transcriptionResult.engine}`
+        `⚠️ ${transcriptionResult.primaryEngine} falló — transcribí con ${transcriptionResult.engine}.`
       )
-    } else {
-      await ctx.reply(`Usando ${transcriptionResult.engine}`)
     }
   } catch (err) {
     clearInterval(heartbeatInterval)
