@@ -158,7 +158,7 @@ function createBot() {
 
   // Agent-switching commands
   bot.command('claude', (ctx) => handleSetAgent(ctx, 'claude'))
-  bot.command('gemini', (ctx) => handleSetAgent(ctx, 'gemini'))
+  bot.command('antigravity', (ctx) => handleSetAgent(ctx, 'antigravity'))
   bot.command('codex',  (ctx) => handleSetAgent(ctx, 'codex'))
   bot.command('setagent', handleSetAgentCmd)
   bot.command('ping',   (ctx) => {

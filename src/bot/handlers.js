@@ -157,7 +157,7 @@ async function handleStart(ctx) {
     `Enviame cualquier tarea y se la delego al agente.\n\n` +
     `*Comandos útiles:*\n` +
     `/agentes — ver agentes disponibles\n` +
-    `/claude · /gemini · /codex — cambiar agente\n` +
+    `/claude · /antigravity · /codex — cambiar agente\n` +
     `/newagent — crear un agente personalizado\n` +
     `/auto <tarea> — Root Agent elige el mejor agente\n` +
     `/sesion — info de tu sesión\n` +
@@ -184,12 +184,12 @@ async function handleHelp(ctx) {
     `Escribí tu consulta directamente. Se la mando al agente activo.\n\n` +
     `*Mencionar un agente puntualmente:*\n` +
     `\`@claude <tarea>\` — usa Claude para esa respuesta\n` +
-    `\`@gemini <tarea>\` — usa Gemini para esa respuesta\n` +
+    `\`@antigravity <tarea>\` — usa Antigravity para esa respuesta\n` +
     `\`@codex <tarea>\` — usa Codex para esa respuesta\n` +
     `\`@python-expert <tarea>\` — usa un custom agent\n` +
-    `También funcionan los aliases: \`@cc\`, \`@gem\`, \`@g\`, \`@gpt\`, etc.\n\n` +
+    `También funcionan los aliases: \`@cc\`, \`@agy\`, \`@ag\`, \`@gpt\`, etc.\n\n` +
     `*Cambiar agente activo:*\n` +
-    `/claude · /gemini · /codex\n` +
+    `/claude · /antigravity · /codex\n` +
     `/setagent <id> — activar un custom agent\n\n` +
     `*Custom Agents:*\n` +
     `/newagent — crear un agente especializado\n` +
@@ -484,7 +484,9 @@ async function handleSession(ctx) {
 // Pricing per million tokens (USD) — default to Sonnet 4.x rates
 const AGENT_PRICES = {
   claude: { inputPer1M: 3.0,  outputPer1M: 15.0 },
-  gemini: { inputPer1M: 0.35, outputPer1M: 1.05 },
+  // Aproximado — Antigravity permite elegir motor vía --model (Gemini/Claude/GPT-OSS,
+  // costos muy distintos entre sí); se usa el precio de Gemini Flash como default conservador.
+  antigravity: { inputPer1M: 0.35, outputPer1M: 1.05 },
   codex:  { inputPer1M: 3.0,  outputPer1M: 12.0 },
 }
 
@@ -656,7 +658,7 @@ async function handleReloadSoul(ctx) {
 
 // ─── /policy ──────────────────────────────────────────────────────────────────
 
-const POLICY_AGENTS = ['default', 'claude', 'gemini', 'codex']
+const POLICY_AGENTS = ['default', 'claude', 'antigravity', 'codex']
 
 async function handlePolicy(ctx) {
   const parts  = (ctx.message?.text ?? '').trim().split(/\s+/)
@@ -1092,7 +1094,7 @@ async function handleNewAgentVoiceSelect(ctx, voiceName) {
   session.newAgentFlow.answers.ttsGender = entry?.gender ?? 'masc'
   session.newAgentFlow.step = 'awaiting_cli'
   const cliStatus = global.__cliStatus ?? {}
-  const buttons = ['claude', 'gemini', 'codex'].map(cli => {
+  const buttons = ['claude', 'antigravity', 'codex'].map(cli => {
     const ok = cliStatus[cli]?.found !== false
     return { text: `${ok ? '✅' : '⚠️'} ${cli}`, callback_data: `newagent_cli:${cli}` }
   })
@@ -1167,7 +1169,7 @@ async function handleEditAgentFieldSelect(ctx, field, id) {
         reply_markup: {
           inline_keyboard: [[
             { text: '🤖 Claude', callback_data: 'editagent_cli_val:claude' },
-            { text: '✨ Gemini', callback_data: 'editagent_cli_val:gemini' },
+            { text: '✨ Antigravity', callback_data: 'editagent_cli_val:antigravity' },
             { text: '🧠 Codex',  callback_data: 'editagent_cli_val:codex'  },
           ]],
         },

@@ -1,7 +1,7 @@
 {
   "name": "krakbot",
   "version": "1.0.0",
-  "description": "🐙⚡ KrakBot — Telegram gateway to multiple AI CLI agents (Claude Code, Gemini CLI, Codex CLI)",
+  "description": "🐙⚡ KrakBot — Telegram gateway to multiple AI CLI agents (Claude Code, Antigravity CLI, Codex CLI)",
   "main": "src/index.js",
   "type": "commonjs",
   "scripts": {

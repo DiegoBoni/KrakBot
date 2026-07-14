@@ -8,7 +8,7 @@ const state = {
     authorizedUsers: '',
     defaultAgent: 'claude',
     claudeModel: 'claude-sonnet-4-6',
-    geminiModel: 'gemini-2.5-pro',
+    antigravityModel: '',
     codexModel: '',
     debug: false,
     httpEnabled: false,
@@ -19,7 +19,7 @@ const state = {
     httpMaxConcurrent: '3',
     httpTaskTtlHours: '2',
   },
-  cliStatus: { claude: null, gemini: null, codex: null },
+  cliStatus: { claude: null, antigravity: null, codex: null },
   envExists: false,
   hasGit: false,
   npmInstallDone: false,
@@ -233,7 +233,7 @@ async function loadExistingEnv() {
     if (env.AUTHORIZED_USERS) $('authorized-users').value = env.AUTHORIZED_USERS
     if (env.DEFAULT_AGENT)    { const s = $('default-agent'); if (s) s.value = env.DEFAULT_AGENT }
     if (env.CLAUDE_MODEL)     { const s = $('model-claude');  if (s) s.value = env.CLAUDE_MODEL }
-    if (env.GEMINI_MODEL)     { const s = $('model-gemini');  if (s) s.value = env.GEMINI_MODEL }
+    if (env.ANTIGRAVITY_MODEL) { const s = $('model-antigravity'); if (s) s.value = env.ANTIGRAVITY_MODEL }
     if (env.CODEX_MODEL)      { const s = $('model-codex');   if (s) s.value = env.CODEX_MODEL }
     if (env.DEBUG)            { const t = $('debug-toggle'); if (t) t.checked = env.DEBUG === 'true' }
   } catch (err) {
@@ -247,16 +247,19 @@ async function enterStep4() {
 }
 
 async function checkAllCLIs() {
-  const agents = ['claude', 'gemini', 'codex']
+  const agents = ['claude', 'antigravity', 'codex']
   await Promise.all(agents.map((name) => checkOneCLI(name)))
 }
+
+// Agent key → actual binary name checked on disk (differs for Antigravity: `agy`).
+const CLI_BIN = { claude: 'claude', antigravity: 'agy', codex: 'codex' }
 
 async function checkOneCLI(name) {
   try {
     const res = await fetch(`${BASE}/api/check-cli`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name: CLI_BIN[name] || name }),
     })
     const data = await res.json()
     state.cliStatus[name] = data
@@ -280,7 +283,7 @@ function updateAgentCard(name, status) {
     badge.className = 'badge badge-ok'
     card.classList.add('status-ok')
     card.classList.remove('status-error')
-    btnInstall.hidden = true
+    if (btnInstall) btnInstall.hidden = true
     authInstruction.hidden = false
     authRow.hidden = false
     selectRow.hidden = name === 'codex' ? !$('auth-check-codex')?.checked : false
@@ -289,8 +292,10 @@ function updateAgentCard(name, status) {
     badge.className = 'badge badge-error'
     card.classList.add('status-error')
     card.classList.remove('status-ok')
-    btnInstall.hidden = false
-    authInstruction.hidden = true
+    if (btnInstall) btnInstall.hidden = false
+    // Antigravity no tiene botón de auto-instalar (no se instala vía npm) — el mensaje
+    // con el link a antigravity.google queda siempre visible en vez de ocultarse.
+    authInstruction.hidden = name === 'antigravity' ? false : true
     authRow.hidden = true
     selectRow.hidden = true
   }
@@ -329,7 +334,7 @@ function setupInstallCLI(name, pkg) {
 }
 
 function validateAgentStep() {
-  const agents = ['claude', 'gemini', 'codex']
+  const agents = ['claude', 'antigravity', 'codex']
   const warning = $('agents-warning')
 
   const anyReady = agents.some((name) => {
@@ -482,7 +487,7 @@ function enterStep7() {
     ['Usuarios autorizados', config.authorizedUsers || 'Todos'],
     ['Agente por defecto', config.defaultAgent],
     ['Modelo Claude', config.claudeModel],
-    ['Modelo Gemini', config.geminiModel],
+    ['Modelo Antigravity', config.antigravityModel || 'default CLI'],
     ['Modelo Codex', config.codexModel || 'default CLI'],
     ['Debug', config.debug ? 'Activado' : 'Desactivado'],
     ...(config.includeAudio ? [['Audio (Whisper)', `${config.whisperModel} — idioma: ${config.whisperLanguage}`]] : []),
@@ -508,7 +513,7 @@ function buildConfig() {
     authorizedUsers: $('authorized-users').value.trim(),
     defaultAgent:   $('default-agent').value || 'claude',
     claudeModel:    $('model-claude').value || 'claude-sonnet-4-6',
-    geminiModel:    $('model-gemini').value || 'gemini-2.5-pro',
+    antigravityModel: $('model-antigravity')?.value || '',
     codexModel:     $('auth-check-codex')?.checked ? ($('model-codex').value || '') : '',
     debug:          $('debug-toggle').checked,
     includeAudio:   state.isAppleSilicon && state.audioTools.mlxWhisper,
@@ -566,11 +571,11 @@ DEBUG=${config.debug}
 CLI_TIMEOUT=120000
 
 CLAUDE_CLI_PATH=claude
-GEMINI_CLI_PATH=gemini
+ANTIGRAVITY_CLI_PATH=agy
 CODEX_CLI_PATH=codex
 
 CLAUDE_MODEL=${config.claudeModel}
-GEMINI_MODEL=${config.geminiModel}
+ANTIGRAVITY_MODEL=${config.antigravityModel || ''}
 CODEX_MODEL=${config.codexModel || ''}
 
 MAX_RESPONSE_LENGTH=4000
@@ -790,11 +795,12 @@ async function init() {
   })
 
   // Step 4 — setup install handlers
+  // Antigravity no tiene botón de auto-instalar: no se instala vía npm (ver auth-antigravity
+  // en index.html, que linkea a antigravity.google). Solo se verifica con /api/check-cli.
   setupInstallCLI('claude', '@anthropic-ai/claude-code')
-  setupInstallCLI('gemini', '@google/gemini-cli')
   setupInstallCLI('codex',  '@openai/codex')
 
-  ;['claude', 'gemini', 'codex'].forEach((name) => {
+  ;['claude', 'antigravity', 'codex'].forEach((name) => {
     const cb = $(`auth-check-${name}`)
     if (cb) cb.addEventListener('change', validateAgentStep)
   })
@@ -809,7 +815,7 @@ async function init() {
 
   $('btn-step4-back').addEventListener('click', () => goToStep(3))
   $('btn-step4-next').addEventListener('click', () => {
-    const agents = ['claude', 'gemini', 'codex']
+    const agents = ['claude', 'antigravity', 'codex']
     const anyReady = agents.some((name) => {
       return state.cliStatus[name]?.found && $(`auth-check-${name}`)?.checked
     })

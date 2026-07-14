@@ -37,7 +37,7 @@ const DOMAINS = [
 
 function buildModelKeyboard() {
   const cliStatus = global.__cliStatus ?? {}
-  const buttons = ['claude', 'gemini', 'codex']
+  const buttons = ['claude', 'antigravity', 'codex']
     .filter(c => cliStatus[c]?.found !== false)
     .map(c => ({ text: `✅ ${c}`, callback_data: `buildteam_model:${c}` }))
   return { inline_keyboard: [buttons] }

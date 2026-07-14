@@ -5,7 +5,7 @@
  *
  * File resolution order (merged in this order):
  *   1. data/policies/default.md  — applies to all agents
- *   2. data/policies/{agentKey}.md — agent-specific additions (claude, gemini, codex)
+ *   2. data/policies/{agentKey}.md — agent-specific additions (claude, antigravity, codex)
  *
  * If neither file exists, no policy block is injected.
  * Files are read fresh on every get() call so changes take effect without restart.
@@ -40,7 +40,7 @@ class PolicyManager {
   /**
    * Returns the merged policy for the given agent key, or null if no policy files exist.
    * Reads from disk on every call — no caching — so edits take effect immediately.
-   * @param {string} [agentKey]  e.g. 'claude', 'gemini', 'codex'
+   * @param {string} [agentKey]  e.g. 'claude', 'antigravity', 'codex'
    * @returns {string|null}
    */
   get(agentKey) {
