@@ -10,7 +10,7 @@
 
 # KrakBot
 
-> Gateway de Telegram hacia múltiples agentes de IA CLI — Claude Code, Gemini CLI y OpenAI Codex CLI.
+> Gateway de Telegram hacia múltiples agentes de IA CLI — Claude Code, Antigravity CLI y OpenAI Codex CLI.
 > Un mensaje (o un archivo o una nota de voz), el agente que elijas, respuesta directo en el chat.
 > Creá agentes personalizados, organizalos en equipos multi-agente, y dejá que un Root Agent los orqueste automáticamente.
 
@@ -63,10 +63,10 @@ npm start
 | `AUTHORIZED_USERS`          | (vacío)                            | IDs de Telegram separados por coma; vacío = permitir a todos |
 | `DEBUG`                     | `false`                            | Logs verbosos                                                |
 | `CLAUDE_CLI_PATH`           | `claude`                           | Ruta o nombre del ejecutable de Claude Code                  |
-| `GEMINI_CLI_PATH`           | `gemini`                           | Ruta o nombre del ejecutable de Gemini CLI                   |
+| `ANTIGRAVITY_CLI_PATH`      | `agy`                               | Ruta o nombre del ejecutable de Antigravity CLI               |
 | `CODEX_CLI_PATH`            | `codex`                            | Ruta o nombre del ejecutable de Codex CLI                    |
 | `CLAUDE_MODEL`              | —                                  | Modelo específico para Claude (ej: `claude-sonnet-4-6`)      |
-| `GEMINI_MODEL`              | —                                  | Modelo específico para Gemini                                |
+| `ANTIGRAVITY_MODEL`         | —                                  | Modelo específico para Antigravity (nombre completo, ver `agy models`) |
 | `CODEX_MODEL`               | —                                  | Modelo específico para Codex                                 |
 | `MAX_RESPONSE_LENGTH`       | `4000`                             | Máximo de chars por mensaje antes de partir en chunks        |
 | `SOUL_PATH`                 | `./data/SOUL.md`                   | Ruta al archivo de soul (personalidad del bot)               |
@@ -95,7 +95,7 @@ npm start
 | `HTTP_PORT`                 | —                                  | Puerto del HTTP Gateway (descomentá para activarlo; sin este var, el gateway no arranca) |
 | `HTTP_HOST`                 | `127.0.0.1`                        | IP de bind. Usá `0.0.0.0` con Tailscale para acceso desde otros dispositivos |
 | `HTTP_API_KEY`              | —                                  | Clave de autenticación para el gateway. **Obligatoria** si `HTTP_HOST` no es localhost |
-| `HTTP_AGENT_ALLOWLIST`      | (vacío)                            | Agentes permitidos vía HTTP, separados por coma (ej: `claude,gemini`). Vacío = todos |
+| `HTTP_AGENT_ALLOWLIST`      | (vacío)                            | Agentes permitidos vía HTTP, separados por coma (ej: `claude,antigravity`). Vacío = todos |
 | `HTTP_MAX_CONCURRENT`       | `3`                                | Máximo de ejecuciones de agentes en paralelo vía HTTP |
 | `HTTP_TASK_TTL_HOURS`       | `2`                                | Horas antes de que las tareas completadas se purguen de memoria |
 
@@ -108,7 +108,7 @@ npm start
 | Comando    | Descripción                                 |
 |------------|---------------------------------------------|
 | `/claude`  | Cambiar agente activo a Claude Code         |
-| `/gemini`  | Cambiar agente activo a Gemini CLI          |
+| `/antigravity` | Cambiar agente activo a Antigravity CLI |
 | `/codex`   | Cambiar agente activo a Codex CLI           |
 | `/default` | Volver al agente por defecto                |
 | `/agents`  | Listar todos los agentes disponibles        |
@@ -195,7 +195,7 @@ npm start
 
 ## Agentes personalizados
 
-Los agentes personalizados son agentes especializados que creás vos con un system prompt propio. Se construyen sobre uno de los CLIs integrados (Claude, Gemini o Codex) y quedan disponibles para toda tu sesión.
+Los agentes personalizados son agentes especializados que creás vos con un system prompt propio. Se construyen sobre uno de los CLIs integrados (Claude, Antigravity o Codex) y quedan disponibles para toda tu sesión.
 
 ### Crear un agente
 
@@ -209,11 +209,11 @@ El bot te guía paso a paso:
 2. **Descripción** — para que el Root Agent sepa en qué tareas usarlo
 3. **System prompt** — las instrucciones completas del agente
 4. **Voz TTS** — selector por idioma: elegís idioma y luego la voz específica (ej: Jenny en inglés US, Tomás en español AR). La voz se aplica automáticamente cada vez que activás ese agente.
-5. **CLI base** — elegís Claude, Gemini o Codex
+5. **CLI base** — elegís Claude, Antigravity o Codex
 
 El agente queda disponible inmediatamente con un ID generado automáticamente (ej: `python-expert`).
 
-> Los MCPs (herramientas externas como Gmail, GitHub, etc.) se configuran directamente en cada CLI — Claude con `claude mcp add`, Gemini con su config, etc. Todos los sub-agentes de ese CLI los heredan automáticamente.
+> Los MCPs (herramientas externas como Gmail, GitHub, etc.) se configuran directamente en cada CLI — Claude con `claude mcp add`, Antigravity con su config, etc. Todos los sub-agentes de ese CLI los heredan automáticamente.
 
 ### Usar un agente personalizado
 
@@ -228,7 +228,7 @@ o desde `/agentes` → botón *Activar*.
 @python-expert escribí una función para ordenar una lista
 ```
 
-**Una vez activo**, el agente persiste hasta que uses `/default`, `/claude`, `/gemini`, `/codex` u otro `/setagent`.
+**Una vez activo**, el agente persiste hasta que uses `/default`, `/claude`, `/antigravity`, `/codex` u otro `/setagent`.
 
 ### Editar un agente
 
@@ -264,7 +264,7 @@ El wizard de IA te guía paso a paso:
 2. **Objetivo** — describís en una oración qué tipo de tareas va a resolver
 3. **Recomendación IA** — el bot genera la estructura completa (coordinator, workers, reviewer, system prompts)
 4. **Confirmación** — podés aprobar, personalizar o pedir otra estructura
-5. **Modelo por agente** — elegís Claude, Gemini o Codex para cada agente del equipo individualmente
+5. **Modelo por agente** — elegís Claude, Antigravity o Codex para cada agente del equipo individualmente
 
 El equipo y todos sus agentes quedan creados y disponibles inmediatamente.
 
@@ -448,7 +448,7 @@ El archivo queda en espera. Tu próximo mensaje de texto lo usa como contexto.
 | PDFs          | pdf                                               | Claude (y custom Claude)  |
 | Texto / código| txt, md, csv, json, xml, yaml, html, css, js, ts, py, java, c, cpp, go, rs, rb, php, sh, sql… | Todos los agentes |
 
-> Gemini y Codex solo soportan archivos de texto. Los archivos binarios (imágenes, PDFs) se rechazan con un aviso si el agente activo no es Claude.
+> Antigravity y Codex solo soportan archivos de texto. Los archivos binarios (imágenes, PDFs) se rechazan con un aviso si el agente activo no es Claude.
 
 ### Límite de tamaño
 
@@ -478,7 +478,7 @@ Aliases de agentes integrados:
 | Agente     | Aliases                  |
 |------------|--------------------------|
 | Claude     | `@claude`, `@cc`, `@c`   |
-| Gemini     | `@gemini`, `@gem`, `@g`  |
+| Antigravity | `@antigravity`, `@agy`, `@ag`  |
 | Codex      | `@codex`, `@gpt`, `@o`   |
 
 Para agentes y equipos personalizados, usá su ID directamente: `@python-expert`, `@equipo-dev`, etc.
@@ -493,7 +493,7 @@ src/
 │   ├── runner.js             # Wrapper genérico de child_process.spawn con timeout y heartbeat
 │   ├── router.js             # Registro de agentes, dispatch, resolución de aliases y Root Agent
 │   ├── claude.js             # Runner de Claude: inyecta historial de sesión como contexto
-│   ├── gemini.js             # Runner de Gemini
+│   ├── antigravity.js        # Runner de Antigravity
 │   └── codex.js              # Runner de Codex
 ├── bot/
 │   ├── index.js              # Setup de Telegraf, registro de comandos, error handler
@@ -547,7 +547,7 @@ Telegram msg / archivo
   → router.js             (Root Agent si autoMode → agente o equipo)
 
   Si agente:
-    → custom agent / claude|gemini|codex.js
+    → custom agent / claude|antigravity|codex.js
     → contextBuilder.js   (soul + policy + memorias + historial)
     → runner.js           (spawn CLI con env sanitizado, timeout, heartbeat cada 30s)
     → respuesta en chunks ≤4000 chars → Telegram
@@ -736,7 +736,7 @@ Las políticas son archivos Markdown en `data/policies/` que se inyectan en el c
 |------------------------------|----------------------------------------------|
 | `data/policies/default.md`   | Se aplica a todos los agentes                |
 | `data/policies/claude.md`    | Solo se aplica cuando el agente activo es Claude |
-| `data/policies/gemini.md`    | Solo se aplica cuando el agente activo es Gemini |
+| `data/policies/antigravity.md` | Solo se aplica cuando el agente activo es Antigravity |
 | `data/policies/codex.md`     | Solo se aplica cuando el agente activo es Codex  |
 
 El contenido de ambos archivos (default + agente) se concatena antes de ser inyectado. Los cambios en disco tienen efecto **inmediato** sin reiniciar el bot.
@@ -769,7 +769,7 @@ Muestra un menú inline para ver o editar cualquiera de los archivos de polític
 
 # KrakBot — English
 
-> Telegram gateway to multiple AI CLI agents — Claude Code, Gemini CLI and OpenAI Codex CLI.
+> Telegram gateway to multiple AI CLI agents — Claude Code, Antigravity CLI and OpenAI Codex CLI.
 > A message (or a file or a voice note), the agent of your choice, response right in the chat.
 > Create custom agents, organize them into multi-agent teams, and let a Root Agent orchestrate them automatically.
 
@@ -822,10 +822,10 @@ npm start
 | `AUTHORIZED_USERS`            | (empty)                            | Comma-separated Telegram user IDs; empty = allow everyone          |
 | `DEBUG`                       | `false`                            | Verbose logging                                                    |
 | `CLAUDE_CLI_PATH`             | `claude`                           | Path or name of the Claude Code executable                         |
-| `GEMINI_CLI_PATH`             | `gemini`                           | Path or name of the Gemini CLI executable                          |
+| `ANTIGRAVITY_CLI_PATH`        | `agy`                               | Path or name of the Antigravity CLI executable                     |
 | `CODEX_CLI_PATH`              | `codex`                            | Path or name of the Codex CLI executable                           |
 | `CLAUDE_MODEL`                | —                                  | Specific model for Claude (e.g. `claude-sonnet-4-6`)               |
-| `GEMINI_MODEL`                | —                                  | Specific model for Gemini                                          |
+| `ANTIGRAVITY_MODEL`           | —                                  | Specific model for Antigravity (full name, see `agy models`)       |
 | `CODEX_MODEL`                 | —                                  | Specific model for Codex                                           |
 | `MAX_RESPONSE_LENGTH`         | `4000`                             | Max chars per message before splitting into chunks                 |
 | `SOUL_PATH`                   | `./data/SOUL.md`                   | Path to the soul file (bot personality)                            |
@@ -854,7 +854,7 @@ npm start
 | `HTTP_PORT`                   | —                                  | HTTP Gateway port (set to enable it; without this var, the gateway does not start) |
 | `HTTP_HOST`                   | `127.0.0.1`                        | Bind IP. Use `0.0.0.0` with Tailscale for access from other devices |
 | `HTTP_API_KEY`                | —                                  | Authentication key for the gateway. **Required** if `HTTP_HOST` is not localhost |
-| `HTTP_AGENT_ALLOWLIST`        | (empty)                            | Comma-separated agents allowed via HTTP (e.g. `claude,gemini`). Empty = all |
+| `HTTP_AGENT_ALLOWLIST`        | (empty)                            | Comma-separated agents allowed via HTTP (e.g. `claude,antigravity`). Empty = all |
 | `HTTP_MAX_CONCURRENT`         | `3`                                | Max parallel agent executions via HTTP |
 | `HTTP_TASK_TTL_HOURS`         | `2`                                | Hours before completed tasks are purged from memory |
 
@@ -867,7 +867,7 @@ npm start
 | Command    | Description                               |
 |------------|-------------------------------------------|
 | `/claude`  | Switch active agent to Claude Code        |
-| `/gemini`  | Switch active agent to Gemini CLI         |
+| `/antigravity` | Switch active agent to Antigravity CLI |
 | `/codex`   | Switch active agent to Codex CLI          |
 | `/default` | Return to the default agent               |
 | `/agents`  | List all available agents                 |
@@ -954,7 +954,7 @@ npm start
 
 ## Custom agents
 
-Custom agents are specialized agents you create with your own system prompt. They are built on top of one of the built-in CLIs (Claude, Gemini or Codex) and are available for your entire session.
+Custom agents are specialized agents you create with your own system prompt. They are built on top of one of the built-in CLIs (Claude, Antigravity or Codex) and are available for your entire session.
 
 ### Creating an agent
 
@@ -968,11 +968,11 @@ The bot guides you step by step:
 2. **Description** — so the Root Agent knows which tasks to use it for
 3. **System prompt** — the agent's full instructions
 4. **TTS voice** — language picker: choose language then specific voice (e.g. Jenny in US English, Tomás in Argentine Spanish). The voice is applied automatically every time you activate that agent.
-5. **Base CLI** — choose Claude, Gemini or Codex
+5. **Base CLI** — choose Claude, Antigravity or Codex
 
 The agent is available immediately with an auto-generated ID (e.g. `python-expert`).
 
-> MCPs (external tools like Gmail, GitHub, etc.) are configured directly in each CLI — Claude with `claude mcp add`, Gemini with its own config, etc. All sub-agents for that CLI inherit them automatically.
+> MCPs (external tools like Gmail, GitHub, etc.) are configured directly in each CLI — Claude with `claude mcp add`, Antigravity with its own config, etc. All sub-agents for that CLI inherit them automatically.
 
 ### Using a custom agent
 
@@ -987,7 +987,7 @@ or from `/agents` → *Activate* button.
 @python-expert write a function to sort a list
 ```
 
-**Once active**, the agent persists until you use `/default`, `/claude`, `/gemini`, `/codex` or another `/setagent`.
+**Once active**, the agent persists until you use `/default`, `/claude`, `/antigravity`, `/codex` or another `/setagent`.
 
 ### Edit an agent
 
@@ -1023,7 +1023,7 @@ The AI wizard guides you step by step:
 2. **Objective** — describe in one sentence what kind of tasks it will handle
 3. **AI recommendation** — the bot generates the full structure (coordinator, workers, reviewer, system prompts)
 4. **Confirmation** — approve, customize or request a different structure
-5. **Model per agent** — choose Claude, Gemini or Codex for each agent individually
+5. **Model per agent** — choose Claude, Antigravity or Codex for each agent individually
 
 The team and all its agents are created and available immediately.
 
@@ -1207,7 +1207,7 @@ The file stays pending. Your next text message uses it as context.
 | PDFs          | pdf                                                                                   | Claude (and custom Claude)|
 | Text / code   | txt, md, csv, json, xml, yaml, html, css, js, ts, py, java, c, cpp, go, rs, rb, php, sh, sql… | All agents        |
 
-> Gemini and Codex only support text files. Binary files (images, PDFs) are rejected with a warning if the active agent is not Claude.
+> Antigravity and Codex only support text files. Binary files (images, PDFs) are rejected with a warning if the active agent is not Claude.
 
 ### Size limit
 
@@ -1238,7 +1238,7 @@ Built-in agent aliases:
 | Agent  | Aliases                  |
 |--------|--------------------------|
 | Claude | `@claude`, `@cc`, `@c`   |
-| Gemini | `@gemini`, `@gem`, `@g`  |
+| Antigravity | `@antigravity`, `@agy`, `@ag`  |
 | Codex  | `@codex`, `@gpt`, `@o`   |
 
 For custom agents and teams, use their ID directly: `@python-expert`, `@dev-team`, etc.
@@ -1253,7 +1253,7 @@ src/
 │   ├── runner.js             # Generic child_process.spawn wrapper with timeout and heartbeat
 │   ├── router.js             # Agent registry, dispatch, alias resolution and Root Agent
 │   ├── claude.js             # Claude runner: injects session history as context
-│   ├── gemini.js             # Gemini runner
+│   ├── antigravity.js        # Antigravity runner
 │   └── codex.js              # Codex runner
 ├── bot/
 │   ├── index.js              # Telegraf setup, command registration, error handler
@@ -1307,7 +1307,7 @@ Telegram msg / file
   → router.js             (Root Agent if autoMode → agent or team)
 
   If agent:
-    → custom agent / claude|gemini|codex.js
+    → custom agent / claude|antigravity|codex.js
     → contextBuilder.js   (soul + policy + memories + history)
     → runner.js           (spawn CLI with sanitized env, timeout, heartbeat every 30s)
     → response in chunks ≤4000 chars → Telegram
@@ -1496,7 +1496,7 @@ Policies are Markdown files in `data/policies/` injected into the context of eve
 |------------------------------|------------------------------------------------|
 | `data/policies/default.md`   | Applied to all agents                          |
 | `data/policies/claude.md`    | Applied only when the active agent is Claude   |
-| `data/policies/gemini.md`    | Applied only when the active agent is Gemini   |
+| `data/policies/antigravity.md` | Applied only when the active agent is Antigravity |
 | `data/policies/codex.md`     | Applied only when the active agent is Codex    |
 
 Both files (default + agent-specific) are concatenated before injection. Changes on disk take effect **immediately** — no restart needed.

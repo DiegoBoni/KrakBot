@@ -3,8 +3,8 @@ const { AGENTS } = require('./router')
 const contextBuilder = require('../utils/contextBuilder')
 
 async function run(prompt, session, signal, fileOpts = {}) {
-  const agent = AGENTS.gemini
-  // Gemini CLI has no native file flag — only text files are supported (embedded via fileBlock).
+  const agent = AGENTS.antigravity
+  // Antigravity CLI (agy) has no native file flag — only text files are supported (embedded via fileBlock).
   // Binary files (images/PDFs) are rejected before reaching this function.
   const fullPrompt = await contextBuilder.build(prompt, session, {
     fileContent: fileOpts.fileContent,
@@ -14,7 +14,7 @@ async function run(prompt, session, signal, fileOpts = {}) {
 }
 
 async function runStreaming(prompt, session, signal, onChunk, fileOpts = {}) {
-  const agent = AGENTS.gemini
+  const agent = AGENTS.antigravity
   const fullPrompt = await contextBuilder.build(prompt, session, {
     fileContent: fileOpts.fileContent,
     fileName: fileOpts.fileName,

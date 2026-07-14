@@ -24,18 +24,18 @@ const AGENTS = {
     aliases: ['claude', 'cc', 'c'],
     description: 'Anthropic Claude Code — excelente para tareas de código y razonamiento complejo.',
   },
-  gemini: {
-    key: 'gemini',
-    name: 'Gemini CLI',
+  antigravity: {
+    key: 'antigravity',
+    name: 'Antigravity CLI',
     emoji: '✨',
-    cli: process.env.GEMINI_CLI_PATH || 'gemini',
+    cli: process.env.ANTIGRAVITY_CLI_PATH || 'agy',
     printFlag: '-p',
     extraFlags: [
-      '--yolo',
-      ...(process.env.GEMINI_MODEL ? ['-m', process.env.GEMINI_MODEL] : []),
+      '--dangerously-skip-permissions',
+      ...(process.env.ANTIGRAVITY_MODEL ? ['--model', process.env.ANTIGRAVITY_MODEL] : []),
     ],
-    aliases: ['gemini', 'gem', 'g'],
-    description: 'Google Gemini CLI — ventana de contexto enorme, ideal para archivos grandes.',
+    aliases: ['antigravity', 'agy', 'ag'],
+    description: 'Antigravity CLI (Google) — sucesor de Gemini CLI, modelos Gemini/Claude/GPT-OSS.',
   },
   codex: {
     key: 'codex',
@@ -114,7 +114,7 @@ function listAgents() {
 /**
  * Runs a custom agent with its system prompt injected.
  * For Claude: adds --append-system-prompt flag.
- * For Gemini/Codex: injects inline via contextBuilder.
+ * For Antigravity/Codex: injects inline via contextBuilder.
  *
  * @param {object}        customDef  Custom agent definition from customAgentManager
  * @param {string}        prompt     User's task (raw, before contextBuilder)
@@ -144,7 +144,7 @@ async function runCustomAgent(customDef, prompt, session, signal, onChunk, fileO
     if (onChunk) return runCLIStreaming(flags, undefined, signal, onChunk)
     return runCLI(flags, undefined, signal)
   } else {
-    // Gemini/Codex: only text files supported (binary files rejected before reaching here)
+    // Antigravity/Codex: only text files supported (binary files rejected before reaching here)
     const fullPrompt = await contextBuilder.build(prompt, session, {
       inlineSystemPrompt: customDef.systemPrompt,
       fileContent: fileOpts.fileContent,

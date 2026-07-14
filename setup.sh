@@ -99,7 +99,7 @@ read -rp "  > " AUTHORIZED_USERS
 echo ""
 
 # DEFAULT_AGENT
-ask "Agente por defecto: claude / gemini / codex [Enter = claude]:"
+ask "Agente por defecto: claude / antigravity / codex [Enter = claude]:"
 read -rp "  > " DEFAULT_AGENT
 DEFAULT_AGENT="${DEFAULT_AGENT:-claude}"
 
@@ -112,10 +112,9 @@ echo -e "  ${DIM}opciones: claude-sonnet-4-6 | claude-opus-4-6 | claude-haiku-4-
 read -rp "  > " CLAUDE_MODEL
 CLAUDE_MODEL="${CLAUDE_MODEL:-claude-sonnet-4-6}"
 
-ask "Modelo de Gemini [Enter = gemini-2.5-pro]:"
-echo -e "  ${DIM}opciones: gemini-2.5-pro | gemini-2.5-flash | gemini-2.0-flash${RESET}"
-read -rp "  > " GEMINI_MODEL
-GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-pro}"
+ask "Modelo de Antigravity [Enter = usar default de Antigravity]:"
+echo -e "  ${DIM}corré 'agy models' para ver las opciones disponibles${RESET}"
+read -rp "  > " ANTIGRAVITY_MODEL
 
 ask "Modelo de Codex/OpenAI [Enter = default del CLI]:"
 echo -e "  ${DIM}opciones: o4-mini | o3 | o3-mini${RESET}"
@@ -147,11 +146,11 @@ CLI_TIMEOUT=${CLI_TIMEOUT}
 DEBUG=${DEBUG}
 
 CLAUDE_CLI_PATH=claude
-GEMINI_CLI_PATH=gemini
+ANTIGRAVITY_CLI_PATH=agy
 CODEX_CLI_PATH=codex
 
 CLAUDE_MODEL=${CLAUDE_MODEL}
-GEMINI_MODEL=${GEMINI_MODEL}
+ANTIGRAVITY_MODEL=${ANTIGRAVITY_MODEL}
 CODEX_MODEL=${CODEX_MODEL}
 
 MAX_RESPONSE_LENGTH=4000
@@ -173,7 +172,7 @@ check_cli() {
 }
 
 check_cli claude
-check_cli gemini
+check_cli agy
 check_cli codex
 
 # ─── done ─────────────────────────────────────────────────────────────────────

@@ -197,11 +197,11 @@ DEBUG=${config.debug || false}
 CLI_TIMEOUT=120000
 
 CLAUDE_CLI_PATH=claude
-GEMINI_CLI_PATH=gemini
+ANTIGRAVITY_CLI_PATH=agy
 CODEX_CLI_PATH=codex
 
 CLAUDE_MODEL=${config.claudeModel || 'claude-sonnet-4-6'}
-GEMINI_MODEL=${config.geminiModel || 'gemini-2.5-pro'}
+ANTIGRAVITY_MODEL=${config.antigravityModel || ''}
 CODEX_MODEL=${config.codexModel || ''}
 
 MAX_RESPONSE_LENGTH=4000
@@ -311,7 +311,7 @@ async function router(req, res, port) {
 
     const clisFound = {
       claude: checkCLI('claude').found,
-      gemini: checkCLI('gemini').found,
+      antigravity: checkCLI('agy').found,
       codex:  checkCLI('codex').found,
     }
 

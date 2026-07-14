@@ -48,7 +48,7 @@
       <div class="card">
         <h2>Bienvenido a KrakBot</h2>
         <p style="margin-top:0.5rem;">
-          KrakBot conecta tu Telegram con agentes de IA (Claude, Gemini, Codex)
+          KrakBot conecta tu Telegram con agentes de IA (Claude, Antigravity, Codex)
           para que podás hacer consultas desde tu teléfono con un mensaje.
         </p>
         <p style="margin-top:0.25rem;">
@@ -181,26 +181,28 @@
             </div>
           </div>
 
-          <!-- Gemini -->
-          <div class="agent-card" id="card-gemini" data-agent="gemini">
-            <h3>✨ Gemini</h3>
-            <p class="agent-desc">Gemini CLI de Google — ideal para búsquedas y síntesis</p>
-            <span class="badge badge-pending" id="badge-gemini">⏳ Verificando...</span>
+          <!-- Antigravity -->
+          <div class="agent-card" id="card-antigravity" data-agent="antigravity">
+            <h3>✨ Antigravity</h3>
+            <p class="agent-desc">Antigravity CLI de Google (sucesor de Gemini CLI) — modelos Gemini, Claude y GPT-OSS</p>
+            <span class="badge badge-pending" id="badge-antigravity">⏳ Verificando...</span>
             <div>
-              <button class="btn btn-secondary btn-sm" id="btn-install-gemini" hidden>Instalar Gemini CLI</button>
-              <div class="terminal" id="terminal-gemini" hidden></div>
-              <p class="auth-instruction" id="auth-gemini" hidden>
-                Al ejecutar Gemini por primera vez, te va a pedir iniciar sesión con Google.
+              <p class="auth-instruction" id="auth-antigravity" hidden>
+                Antigravity no se instala vía npm. Si el CLI (<code>agy</code>) no está detectado,
+                instalalo desde <a href="https://antigravity.google/" target="_blank" rel="noopener">antigravity.google</a>
+                y volvé a esta pantalla para verificar de nuevo.
               </p>
-              <label class="checkbox-row" id="row-auth-gemini" hidden>
-                <input type="checkbox" id="auth-check-gemini"> Ya inicié sesión con Google
+              <div class="terminal" id="terminal-antigravity" hidden></div>
+              <label class="checkbox-row" id="row-auth-antigravity" hidden>
+                <input type="checkbox" id="auth-check-antigravity"> Ya inicié sesión con Antigravity
               </label>
-              <div class="select-row" id="select-row-gemini" hidden>
-                <label for="model-gemini">Modelo:</label>
-                <select id="model-gemini">
-                  <option value="gemini-2.5-pro">gemini-2.5-pro (recomendado)</option>
-                  <option value="gemini-2.5-flash">gemini-2.5-flash (más rápido)</option>
-                  <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+              <div class="select-row" id="select-row-antigravity" hidden>
+                <label for="model-antigravity">Modelo:</label>
+                <select id="model-antigravity">
+                  <option value="">(usar default de Antigravity)</option>
+                  <option value="Gemini 3.5 Flash (Medium)">Gemini 3.5 Flash (Medium) (recomendado)</option>
+                  <option value="Gemini 3.1 Pro (High)">Gemini 3.1 Pro (High) (más potente)</option>
+                  <option value="Claude Sonnet 4.6 (Thinking)">Claude Sonnet 4.6 (Thinking)</option>
                 </select>
               </div>
             </div>
@@ -311,7 +313,7 @@
             <label for="default-agent">Agente por defecto</label>
             <select id="default-agent">
               <option value="claude">Claude</option>
-              <option value="gemini">Gemini</option>
+              <option value="antigravity">Antigravity</option>
               <option value="codex">Codex</option>
             </select>
           </div>
@@ -394,10 +396,10 @@
                   Agentes permitidos
                   <span class="tooltip-wrap">
                     <span class="tooltip-icon">?</span>
-                    <span class="tooltip-box">Comma-separated. Ej: claude,gemini. Si está vacío, todos los agentes son válidos.</span>
+                    <span class="tooltip-box">Comma-separated. Ej: claude,antigravity. Si está vacío, todos los agentes son válidos.</span>
                   </span>
                 </label>
-                <input type="text" id="http-agent-allowlist" placeholder="claude,gemini (vacío = todos)">
+                <input type="text" id="http-agent-allowlist" placeholder="claude,antigravity (vacío = todos)">
               </div>
 
               <div class="input-group" style="margin-top:0.75rem;">
