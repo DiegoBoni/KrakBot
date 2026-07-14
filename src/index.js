@@ -1,5 +1,10 @@
 require('dotenv').config()
 
+// El timeout por defecto de Happy Eyeballs (250ms) es demasiado corto para
+// alcanzar api.telegram.org en redes con latencia alta (p. ej. vía Tailscale)
+// y provoca ETIMEDOUT en getMe() al arrancar.
+require('net').setDefaultAutoSelectFamilyAttemptTimeout(3000)
+
 const { mkdirSync } = require('fs')
 const path = require('path')
 const { createBot } = require('./bot/index')
@@ -144,7 +149,7 @@ async function main() {
     { command: 'start',     description: 'Bienvenida e instrucciones' },
     { command: 'agentes',   description: 'Ver agentes disponibles' },
     { command: 'claude',    description: 'Cambiar agente a Claude' },
-    { command: 'gemini',    description: 'Cambiar agente a Gemini' },
+    { command: 'antigravity', description: 'Cambiar agente a Antigravity' },
     { command: 'codex',     description: 'Cambiar agente a Codex' },
     { command: 'newagent',  description: 'Crear un agente personalizado' },
     { command: 'delagent',  description: 'Borrar un custom agent' },
