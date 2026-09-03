@@ -28,6 +28,7 @@ data/custom-agents.json
 data/teams.json
 data/tasks.json
 data/team-tasks.json
+data/projects.json
 
 # macOS metadata
 .DS_Store
